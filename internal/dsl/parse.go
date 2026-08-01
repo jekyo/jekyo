@@ -189,6 +189,14 @@ func validate(app *App) error {
 		} else if _, err := resource.ParseQuantity(v.Size); err != nil {
 			bad("volume %s: invalid size %q", name, v.Size)
 		}
+		if v.Backup != nil {
+			if len(strings.Fields(v.Backup.Schedule)) != 5 {
+				bad("volume %s: backup.schedule %q is not a 5-field cron expression", name, v.Backup.Schedule)
+			}
+			if v.Backup.Keep < 0 {
+				bad("volume %s: backup.keep must be positive", name)
+			}
+		}
 		used := false
 		for _, svc := range app.Services {
 			if _, ok := svc.Volumes[name]; ok {

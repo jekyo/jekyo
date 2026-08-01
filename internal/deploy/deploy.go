@@ -254,6 +254,29 @@ func toUnstructured(obj runtime.Object) (*unstructured.Unstructured, error) {
 	return u, nil
 }
 
+// EnsureBackupSecret copies the cluster backup target (kube-system) into
+// the app's namespace so backup pods can reference it.
+func (d *Deployer) EnsureBackupSecret(ctx context.Context, appName string) error {
+	src, err := d.Client.Typed.CoreV1().Secrets("kube-system").Get(ctx, compile.BackupSecretName, metav1.GetOptions{})
+	if err != nil {
+		return fmt.Errorf("no backup target configured; run 'jekyo backup config' first (%w)", err)
+	}
+	ns := compile.NamespaceFor(appName)
+	dst := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: compile.BackupSecretName, Namespace: ns,
+			Labels: map[string]string{compile.LabelApp: appName}},
+		Data: src.Data,
+	}
+	existing, err := d.Client.Typed.CoreV1().Secrets(ns).Get(ctx, compile.BackupSecretName, metav1.GetOptions{})
+	if err == nil {
+		dst.ResourceVersion = existing.ResourceVersion
+		_, err = d.Client.Typed.CoreV1().Secrets(ns).Update(ctx, dst, metav1.UpdateOptions{})
+		return err
+	}
+	_, err = d.Client.Typed.CoreV1().Secrets(ns).Create(ctx, dst, metav1.CreateOptions{})
+	return err
+}
+
 // ApplyManifest re-applies a previously rendered manifest (rollback):
 // server-side apply of each document, prune, and a new release record.
 func (d *Deployer) ApplyManifest(ctx context.Context, appName string, manifest []byte) (int, error) {

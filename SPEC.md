@@ -513,9 +513,9 @@ Installer steps implement `Check() / Apply()` so `install` is convergent and
   in-cluster deploy (read-only SA, `--vpn-only` / basic-auth ingress);
   `?embed=1`. **← v1 release**
 - **M6 — backups + in-cluster builds (v1.1):**
-  - `backup:` per volume (cron schedule + S3 target) compiling to restic
-    CronJobs; `jekyo backup now|ls|restore`; S3 credentials stored once
-    per cluster, not per app.
+  - DONE: `backup:` per volume (cron schedule + S3 target) compiling to
+    restic CronJobs; `jekyo backup config|now|ls|restore`; S3 credentials
+    stored once per cluster; `jekyo init` offers schedules per volume.
   - **in-cluster BuildKit**: buildkitd addon + pure-Go moby/buildkit
     client over the SSH transport — context streamed up, image pushed to
     the internal registry, builds native on the server's arch. Removes

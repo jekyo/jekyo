@@ -2,9 +2,9 @@
 
 **Stop doing ops.** JEKYO turns any server into your own cloud: one
 command installs a batteries-included Kubernetes cluster, one `jekyo.yaml`
-describes an app end to end — build, domains, TLS, volumes, GPUs. Clouds
+describes an app end to end: build, domains, TLS, volumes, GPUs. Clouds
 bill per app, per database, per GPU-hour; a server bills once. And JEKYO
-is built to be operated by AI agents — your DevOps team is
+is built to be operated by AI agents. Your DevOps team is
 `/jekyo deploy this`.
 
 ```sh
@@ -59,9 +59,8 @@ server's architecture. `jekyo render` prints the exact Kubernetes YAML.
 Cursor the DSL and CLI (then just say `/jekyo deploy this`). Any other
 agent: have it run `jekyo skill show`. `jekyo schema` emits JSON Schema.
 
-See [SPEC.md](SPEC.md) for the full specification. Status: pre-release —
-M0–M4 (installer, DSL, builds, day-2 UX) implemented and e2e-tested; M5
-(read-only dashboard) in progress.
+See [SPEC.md](SPEC.md) for the full specification. Status: pre-release. The installer, DSL, builds, and day-2 commands are
+implemented and e2e-tested; the read-only dashboard is in progress.
 
 ## Development
 

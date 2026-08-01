@@ -181,6 +181,7 @@ func newTemplatesCmd() *cobra.Command {
 func newInitCmd() *cobra.Command {
 	var force, useDefaults bool
 	var sets []string
+	var backupFlag string
 	cmd := &cobra.Command{
 		Use:   "init [template]",
 		Short: "Write a jekyo.yaml from a template (default: a minimal skeleton)",
@@ -248,6 +249,30 @@ inputs fail with a list. Discover inputs first: jekyo templates inspect <name>.`
 				return err
 			}
 			yamlOut, envOut := templates.Apply(data, res)
+
+			// Offer scheduled backups for every volume the template ships.
+			backupNoted := false
+			for _, vol := range templates.VolumeNames(yamlOut) {
+				answer := backupFlag
+				if answer == "" && interactive {
+					reader := bufio.NewReader(cmd.InOrStdin())
+					fmt.Fprintf(cmd.OutOrStdout(), "Back up volume %q? (15m, hourly, daily, weekly, cron, or none) [none]: ", vol)
+					line, _ := reader.ReadString('\n')
+					answer = strings.TrimSpace(line)
+				}
+				schedule, err := templates.ScheduleFromFriendly(answer)
+				if err != nil {
+					return fmt.Errorf("volume %s: %w", vol, err)
+				}
+				if schedule != "" {
+					yamlOut = templates.AddVolumeBackup(yamlOut, vol, schedule)
+					backupNoted = true
+				}
+			}
+			if backupNoted {
+				cmd.Println("Backups scheduled. Set the cluster's backup target once with: jekyo backup config")
+			}
+
 			if err := os.WriteFile("jekyo.yaml", yamlOut, 0o644); err != nil {
 				return err
 			}
@@ -267,6 +292,7 @@ inputs fail with a list. Discover inputs first: jekyo templates inspect <name>.`
 	cmd.Flags().BoolVar(&force, "force", false, "overwrite an existing jekyo.yaml")
 	cmd.Flags().BoolVar(&useDefaults, "defaults", false, "non-interactive: accept defaults, generate secrets")
 	cmd.Flags().StringArrayVar(&sets, "set", nil, "input value NAME=value (repeatable)")
+	cmd.Flags().StringVar(&backupFlag, "backup", "", "schedule backups for all volumes: 15m, hourly, daily, weekly, or cron")
 	return cmd
 }
 

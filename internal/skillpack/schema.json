@@ -26,7 +26,16 @@
         "required": ["size"],
         "properties": {
           "size": { "type": "string", "description": "PVC size, e.g. 10Gi" },
-          "class": { "type": "string", "description": "Storage class (default local-path)" }
+          "class": { "type": "string", "description": "Storage class (default local-path)" },
+          "backup": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["schedule"],
+            "properties": {
+              "schedule": { "type": "string", "description": "Cron expression for snapshots" },
+              "keep": { "type": "integer", "minimum": 1, "default": 7 }
+            }
+          }
         }
       }
     }

@@ -162,3 +162,83 @@ func sortedKeys(m map[string]string) []string {
 	sort.Strings(keys)
 	return keys
 }
+
+// ScheduleFromFriendly converts a human answer into a cron expression:
+// "15m", "30 minutes", "hourly", "2h", "daily", "weekly", or a raw 5-field
+// cron string. Empty and "none" mean no backup.
+func ScheduleFromFriendly(s string) (string, error) {
+	s = strings.ToLower(strings.TrimSpace(s))
+	switch s {
+	case "", "none", "no", "n":
+		return "", nil
+	case "hourly":
+		return "0 * * * *", nil
+	case "daily":
+		return "0 3 * * *", nil
+	case "weekly":
+		return "0 3 * * 0", nil
+	}
+	if len(strings.Fields(s)) == 5 {
+		return s, nil // raw cron
+	}
+	var n int
+	var unit string
+	if _, err := fmt.Sscanf(strings.ReplaceAll(s, " ", ""), "%d%s", &n, &unit); err == nil && n > 0 {
+		switch {
+		case strings.HasPrefix(unit, "m"):
+			if n < 1 || n > 59 {
+				return "", fmt.Errorf("minute intervals must be 1-59")
+			}
+			return fmt.Sprintf("*/%d * * * *", n), nil
+		case strings.HasPrefix(unit, "h"):
+			if n < 1 || n > 23 {
+				return "", fmt.Errorf("hour intervals must be 1-23")
+			}
+			return fmt.Sprintf("0 */%d * * *", n), nil
+		case strings.HasPrefix(unit, "d"):
+			return "0 3 */" + fmt.Sprint(n) + " * *", nil
+		}
+	}
+	return "", fmt.Errorf("could not understand %q (try 15m, hourly, daily, weekly, or a cron expression)", s)
+}
+
+// AddVolumeBackup inserts a backup block under a top-level volume in the
+// rendered jekyo.yaml text.
+func AddVolumeBackup(doc []byte, vol, schedule string) []byte {
+	lines := strings.Split(string(doc), "\n")
+	var out []string
+	inVolumes := false
+	for _, l := range lines {
+		out = append(out, l)
+		if strings.HasPrefix(l, "volumes:") {
+			inVolumes = true
+			continue
+		}
+		if inVolumes && l != "" && !strings.HasPrefix(l, " ") && !strings.HasPrefix(l, "#") {
+			inVolumes = false
+		}
+		if inVolumes && strings.TrimRight(l, " ") == "  "+vol+":" {
+			out = append(out,
+				"    backup:",
+				"      schedule: \""+schedule+"\"",
+			)
+		}
+	}
+	return []byte(strings.Join(out, "\n"))
+}
+
+// VolumeNames lists top-level volumes of a template/app document, leniently.
+func VolumeNames(doc []byte) []string {
+	var meta struct {
+		Volumes map[string]any `yaml:"volumes"`
+	}
+	if yaml.Unmarshal(doc, &meta) != nil {
+		return nil
+	}
+	names := make([]string, 0, len(meta.Volumes))
+	for k := range meta.Volumes {
+		names = append(names, k)
+	}
+	sort.Strings(names)
+	return names
+}

@@ -252,3 +252,49 @@ services:
 		t.Fatalf("only referenced hosts should be included: %s", cfg)
 	}
 }
+
+func TestCompileBackupCronJob(t *testing.T) {
+	y := `
+app: a
+services:
+  db:
+    image: postgres:16
+    volumes:
+      data: /var/lib/postgresql/data
+volumes:
+  data:
+    size: 5Gi
+    backup:
+      schedule: "0 3 * * *"
+      keep: 14
+`
+	objs, err := Compile(mustParse(t, y), Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, o := range objs {
+		cj, ok := o.(*batchv1.CronJob)
+		if !ok {
+			continue
+		}
+		found = true
+		if cj.Name != "backup-data" || cj.Spec.Schedule != "0 3 * * *" {
+			t.Fatalf("cronjob: %+v", cj.ObjectMeta)
+		}
+		pod := cj.Spec.JobTemplate.Spec.Template.Spec
+		if pod.Volumes[0].PersistentVolumeClaim.ClaimName != "data-db-0" {
+			t.Fatalf("claim: %+v", pod.Volumes[0])
+		}
+		script := pod.Containers[0].Command[2]
+		if !strings.Contains(script, "--keep-last 14") {
+			t.Fatalf("keep: %s", script)
+		}
+		if !pod.Containers[0].VolumeMounts[0].ReadOnly {
+			t.Fatal("backup mount must be read-only")
+		}
+	}
+	if !found {
+		t.Fatal("no backup CronJob compiled")
+	}
+}

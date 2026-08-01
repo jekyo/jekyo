@@ -115,6 +115,14 @@ func newUpCmd() *cobra.Command {
 			}
 			ctx, cancel := context.WithTimeout(cmd.Context(), deployTimeout)
 			defer cancel()
+			for _, v := range app.Volumes {
+				if v.Backup != nil {
+					if err := d.EnsureBackupSecret(ctx, app.Name); err != nil {
+						return err
+					}
+					break
+				}
+			}
 			rev, err := d.Apply(ctx, app.Name, objs)
 			if err != nil {
 				return err

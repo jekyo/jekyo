@@ -53,6 +53,7 @@ Start with:
 		newTemplatesCmd(),
 		newInitCmd(),
 		newVPNCmd(),
+		newBackupCmd(),
 	)
 	return root
 }

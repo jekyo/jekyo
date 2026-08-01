@@ -156,6 +156,23 @@ func (g GPU) Enabled() bool { return g.Count > 0 || g.Devices != "" }
 type Volume struct {
 	Size  string `yaml:"size"`
 	Class string `yaml:"class"`
+	// Backup schedules restic snapshots of this volume to the cluster's
+	// configured S3 target (jekyo backup config).
+	Backup *VolumeBackup `yaml:"backup"`
+}
+
+// VolumeBackup configures scheduled backups for one volume.
+type VolumeBackup struct {
+	Schedule string `yaml:"schedule"` // cron, e.g. "0 3 * * *"
+	Keep     int    `yaml:"keep"`     // snapshots to retain (default 7)
+}
+
+// KeepCount defaults to 7.
+func (b VolumeBackup) KeepCount() int {
+	if b.Keep <= 0 {
+		return 7
+	}
+	return b.Keep
 }
 
 // MainPort is the service's primary container port (Port, or the first of

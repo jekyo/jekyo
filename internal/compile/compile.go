@@ -52,6 +52,14 @@ type Options struct {
 
 const pullSecretName = "jekyo-registry-pull"
 
+// BackupSecretName holds the cluster's S3 target + restic password; written
+// to kube-system by `jekyo backup config` and copied into app namespaces at
+// deploy time.
+const BackupSecretName = "jekyo-backup"
+
+// ResticImage is the pinned backup runner.
+const ResticImage = "restic/restic:0.17.3"
+
 // Compile renders every object for the app, namespace first.
 func Compile(app *dsl.App, opts Options) ([]runtime.Object, error) {
 	objs := []runtime.Object{namespace(app)}
@@ -71,6 +79,12 @@ func Compile(app *dsl.App, opts Options) ([]runtime.Object, error) {
 	shared := sharedVolumes(app)
 	for _, volName := range sortedKeys(shared) {
 		objs = append(objs, standalonePVC(app, volName))
+	}
+
+	for _, volName := range sortedKeys(app.Volumes) {
+		if app.Volumes[volName].Backup != nil {
+			objs = append(objs, backupCronJob(app, volName, shared[volName]))
+		}
 	}
 
 	for _, name := range sortedKeys(app.Services) {
@@ -181,6 +195,88 @@ func standalonePVC(app *dsl.App, volName string) *corev1.PersistentVolumeClaim {
 		pvc.Spec.StorageClassName = &vol.Class
 	}
 	return pvc
+}
+
+// ClaimNameFor resolves the PVC name a volume is stored under: shared
+// volumes use a standalone claim named after the volume; single-service
+// volumes live in the StatefulSet's claim template (<vol>-<service>-0).
+func ClaimNameFor(app *dsl.App, volName string, isShared bool) string {
+	if isShared {
+		return volName
+	}
+	for _, svcName := range sortedKeys(app.Services) {
+		if _, ok := app.Services[svcName].Volumes[volName]; ok {
+			return volName + "-" + svcName + "-0"
+		}
+	}
+	return volName
+}
+
+// backupCronJob renders the scheduled restic backup for one volume. The
+// jekyo-backup secret provides the S3 target and restic password; the
+// repository path is namespaced per app/volume.
+func backupCronJob(app *dsl.App, volName string, isShared bool) *batchv1.CronJob {
+	b := app.Volumes[volName].Backup
+	script := fmt.Sprintf(
+		"restic snapshots >/dev/null 2>&1 || restic init; "+
+			"restic backup /data --tag jekyo && "+
+			"restic forget --keep-last %d --prune",
+		b.KeepCount())
+	podSpec := BackupPodSpec(app.Name, volName, ClaimNameFor(app, volName, isShared), []string{"/bin/sh", "-c", script}, false)
+	l := labels(app, "")
+	l["jekyo.io/volume"] = volName
+	l["jekyo.io/backup"] = "true"
+	return &batchv1.CronJob{
+		TypeMeta:   metav1.TypeMeta{APIVersion: "batch/v1", Kind: "CronJob"},
+		ObjectMeta: metav1.ObjectMeta{Name: "backup-" + volName, Namespace: NamespaceFor(app.Name), Labels: l},
+		Spec: batchv1.CronJobSpec{
+			Schedule:          b.Schedule,
+			ConcurrencyPolicy: batchv1.ForbidConcurrent,
+			JobTemplate: batchv1.JobTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{Labels: l},
+				Spec: batchv1.JobSpec{
+					Template: corev1.PodTemplateSpec{
+						ObjectMeta: metav1.ObjectMeta{Labels: l},
+						Spec:       podSpec,
+					},
+				},
+			},
+		},
+	}
+}
+
+// BackupPodSpec is the shared pod shape for scheduled backups and the
+// on-demand backup/ls/restore jobs the CLI creates.
+func BackupPodSpec(appName, volName, claimName string, command []string, readWrite bool) corev1.PodSpec {
+	env := []corev1.EnvVar{
+		{Name: "JEKYO_BACKUP_REPO_BASE", ValueFrom: &corev1.EnvVarSource{SecretKeyRef: &corev1.SecretKeySelector{
+			LocalObjectReference: corev1.LocalObjectReference{Name: BackupSecretName}, Key: "repo-base"}}},
+		{Name: "AWS_ACCESS_KEY_ID", ValueFrom: &corev1.EnvVarSource{SecretKeyRef: &corev1.SecretKeySelector{
+			LocalObjectReference: corev1.LocalObjectReference{Name: BackupSecretName}, Key: "access-key"}}},
+		{Name: "AWS_SECRET_ACCESS_KEY", ValueFrom: &corev1.EnvVarSource{SecretKeyRef: &corev1.SecretKeySelector{
+			LocalObjectReference: corev1.LocalObjectReference{Name: BackupSecretName}, Key: "secret-key"}}},
+		{Name: "RESTIC_PASSWORD", ValueFrom: &corev1.EnvVarSource{SecretKeyRef: &corev1.SecretKeySelector{
+			LocalObjectReference: corev1.LocalObjectReference{Name: BackupSecretName}, Key: "restic-password"}}},
+		{Name: "RESTIC_REPOSITORY", Value: fmt.Sprintf("$(JEKYO_BACKUP_REPO_BASE)/%s/%s", appName, volName)},
+	}
+	return corev1.PodSpec{
+		RestartPolicy: corev1.RestartPolicyOnFailure,
+		Containers: []corev1.Container{{
+			Name:    "restic",
+			Image:   ResticImage,
+			Command: command,
+			Env:     env,
+			VolumeMounts: []corev1.VolumeMount{{
+				Name: "data", MountPath: "/data", ReadOnly: !readWrite,
+			}},
+		}},
+		Volumes: []corev1.Volume{{
+			Name: "data",
+			VolumeSource: corev1.VolumeSource{
+				PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: claimName},
+			},
+		}},
+	}
 }
 
 func workload(app *dsl.App, name string, svc dsl.Service, withPullSecret bool, shared map[string]bool) (runtime.Object, error) {

@@ -1,8 +1,8 @@
-# JEKYO — writing and operating jekyo.yaml apps
+# JEKYO: writing and operating jekyo.yaml apps
 
 JEKYO deploys apps described by a single `jekyo.yaml` to a k3s cluster.
 This reference is complete: keys not listed here do not exist. Do not
-invent keys — unknown keys are hard errors.
+invent keys; unknown keys are hard errors.
 
 ## File shape
 
@@ -58,6 +58,9 @@ volumes:                # required for every volume mounted above
   data:
     size: 10Gi          # required
     class: local-path   # optional storage class
+    backup:             # optional scheduled backups (restic to S3)
+      schedule: "0 3 * * *"   # cron; jekyo init also accepts 15m/hourly/daily
+      keep: 7                 # snapshots retained
 ```
 
 ## Semantics to rely on
@@ -68,6 +71,7 @@ volumes:                # required for every volume mounted above
 - `http:` gives the service a TLS URL automatically on clusters installed
   with a domain.
 - Built images are tagged by content hash: `jekyo up` skips unchanged builds.
+- Backups need a one-time cluster target: `jekyo backup config --endpoint ... --bucket ... --access-key ... --secret-key ...`. Then `jekyo backup now|ls|restore <app>/<volume>`.
 - External private registry images need `jekyo registry login <host>` once
   per context; pull secrets are wired automatically.
 
@@ -86,6 +90,6 @@ jekyo images | build [-f file]
 jekyo schema                   # JSON Schema for validation
 ```
 
-Validation is strict: run `jekyo render` after editing jekyo.yaml — parse
+Validation is strict: run `jekyo render` after editing jekyo.yaml: parse
 or validation errors point at the exact problem. Never hand-edit generated
 Kubernetes resources; change jekyo.yaml and re-run `jekyo up`.
