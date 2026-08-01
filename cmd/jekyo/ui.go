@@ -535,6 +535,9 @@ func (m *uiModel) rebuildRows() {
 	byApp := map[string][]string{}
 	seen := map[string]bool{}
 	for _, p := range m.snap.Pods {
+		if p.Service == "" {
+			continue // job pods without a service have no tree row
+		}
 		k := p.App + "/" + p.Service
 		if !seen[k] {
 			seen[k] = true

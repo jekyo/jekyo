@@ -317,6 +317,9 @@ func gatherTop(ctx context.Context, d *deploy.Deployer, contextName, app string)
 		}
 	}
 	for _, p := range pods.Items {
+		if p.Status.Phase == corev1.PodSucceeded {
+			continue // completed job pods (backups, crons) are not services
+		}
 		ready, total, restarts := 0, len(p.Spec.Containers), 0
 		for _, cs := range p.Status.ContainerStatuses {
 			if cs.Ready {

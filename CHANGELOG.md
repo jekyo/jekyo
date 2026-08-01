@@ -6,6 +6,15 @@ All notable changes to JEKYO are documented here. The format follows
 may contain breaking changes and patches never do. From 1.0 on, breaking
 changes only land in major versions.
 
+## [0.18.1] - 2026-08-01
+
+### Fixed
+
+- Completed job pods (backups, scheduled tasks) no longer appear as
+  nameless red services in `jekyo ui` or count against the health
+  verdict; failed backups still surface via the freshness line and
+  events.
+
 ## [0.18.0] - 2026-08-01
 
 ### Added
