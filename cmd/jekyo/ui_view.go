@@ -264,6 +264,14 @@ func (m *uiModel) viewHeader() string {
 	if m.load != "" {
 		sum += "    " + uiDimStyle.Render("load ") + m.load
 	}
+	sum += fmt.Sprintf("    %s %dms", uiDimStyle.Render("api"), m.snap.APIMs)
+	if m.snap.CertDays >= 0 {
+		certs := fmt.Sprintf("%s %dd", uiDimStyle.Render("certs"), m.snap.CertDays)
+		if m.snap.CertDays < 14 {
+			certs = uiRed.Render(fmt.Sprintf("%s certs %dd", m.ic("warn"), m.snap.CertDays))
+		}
+		sum += "    " + certs
+	}
 	if n.MetricsMissed {
 		sum += "  " + uiRed.Render(m.ic("warn")+" metrics warming up")
 	}
@@ -314,6 +322,11 @@ func (m *uiModel) viewHeader() string {
 			mr("Available", m.mem.avail, true),
 			mr("Cached", m.mem.cached, true),
 			mr("Free", m.mem.free, true),
+		}
+		if m.swapT > 0 {
+			sp := pct(m.swapU, m.swapT)
+			memRows = append(memRows, fmt.Sprintf("%s %8s %s %3.0f%%",
+				uiDimStyle.Render(fmt.Sprintf("%-10s", "Swap:")), fmtMem(m.swapU), bar(sp, memW-30), sp))
 		}
 	} else {
 		memRows = []string{
@@ -370,7 +383,8 @@ func (m *uiModel) viewHeader() string {
 		gpuRows = append(gpuRows, "")
 	}
 	memBox := boxWithTitle(btopTitle("²", "mem"), "", memRows, memW)
-	dskBox := boxWithTitle(btopTitle("³", "disks"), "", dskRows, dskW)
+	ioTitle := uiDimStyle.Render(fmt.Sprintf(" io r %s w %s ", fmtRate(m.io.readBps), fmtRate(m.io.writeBps)))
+	dskBox := boxWithTitle(btopTitle("³", "disks"), ioTitle, dskRows, dskW)
 	netCol := boxWithTitle(btopTitle("⁴", "net"), "", netRows, netW) + "\n" +
 		boxWithTitle(btopTitle("⁵", "gpu"), "", gpuRows, netW)
 	return cpuBox + "\n" + lipgloss.JoinHorizontal(lipgloss.Top, memBox, dskBox, netCol)

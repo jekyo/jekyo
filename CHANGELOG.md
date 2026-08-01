@@ -6,6 +6,17 @@ All notable changes to JEKYO are documented here. The format follows
 may contain breaking changes and patches never do. From 1.0 on, breaking
 changes only land in major versions.
 
+## [0.11.0] - 2026-08-01
+
+### Added
+
+- Platform vitals in the `jekyo ui` header: Kubernetes API latency and
+  days until the nearest TLS certificate expires (red under 14 days)
+  next to the cpu summary, disk read/write rates in the disks box
+  border, and a swap row in the mem box when swap exists.
+- `jekyo top --json` gains `apiLatencyMs` and `nearestCertExpiryDays`,
+  so agents can watch cluster health and certificate runway.
+
 ## [0.10.1] - 2026-08-01
 
 ### Fixed

@@ -33,6 +33,13 @@ type snapMsg struct {
 	tempC  int        // package temperature, 0 = unknown
 	mem    memInfo
 	gpu    gpuInfo
+	io     ioRates
+	swapT  int64
+	swapU  int64
+}
+
+type ioRates struct {
+	readBps, writeBps float64
 }
 
 type gpuInfo struct {
@@ -126,6 +133,11 @@ type uiModel struct {
 	tempC    int
 	mem      memInfo
 	gpu      gpuInfo
+	io       ioRates
+	swapT    int64
+	swapU    int64
+	prevDisk [2]uint64 // cumulative sectors read/written
+	prevDiskAt time.Time
 	prevStat map[int][2]uint64 // per-core total/idle counters
 
 	confirm *confirmState
@@ -149,7 +161,7 @@ func (m *uiModel) gatherCmd() tea.Cmd {
 				"cat /proc/loadavg /proc/uptime 2>/dev/null; echo @@@; cat /proc/stat; echo @@@; cat /proc/meminfo; echo @@@; " +
 					"df -B1 -x tmpfs -x devtmpfs -x overlay --output=target,size,used 2>/dev/null | tail -n +2; echo @@@; " +
 					"cat /sys/class/hwmon/hwmon*/temp1_input 2>/dev/null | sort -rn | head -1; echo @@@; " +
-					"nvidia-smi --query-gpu=utilization.gpu,memory.used,memory.total,temperature.gpu --format=csv,noheader,nounits 2>/dev/null || echo none")
+					"nvidia-smi --query-gpu=utilization.gpu,memory.used,memory.total,temperature.gpu --format=csv,noheader,nounits 2>/dev/null || echo none; echo @@@; cat /proc/diskstats")
 			if err == nil {
 				parts := strings.Split(out, "@@@")
 				if len(parts) > 0 {
@@ -193,6 +205,8 @@ func (m *uiModel) gatherCmd() tea.Cmd {
 						avail: mi["MemAvailable"], cached: mi["Cached"],
 					}
 					msg.mem.used = msg.mem.total - msg.mem.avail
+					msg.swapT = mi["SwapTotal"]
+					msg.swapU = mi["SwapTotal"] - mi["SwapFree"]
 				}
 				if len(parts) > 3 {
 					for _, l := range strings.Split(strings.TrimSpace(parts[3]), "\n") {
@@ -216,6 +230,42 @@ func (m *uiModel) gatherCmd() tea.Cmd {
 					if milli > 1000 {
 						msg.tempC = milli / 1000
 					}
+				}
+				if len(parts) > 6 {
+					var rd, wr uint64
+					for _, l := range strings.Split(strings.TrimSpace(parts[6]), "\n") {
+						f := strings.Fields(l)
+						if len(f) < 10 {
+							continue
+						}
+						name := f[2]
+						whole := false
+						if strings.HasPrefix(name, "nvme") && strings.Contains(name, "n") && !strings.Contains(name, "p") {
+							whole = true
+						} else if (strings.HasPrefix(name, "sd") || strings.HasPrefix(name, "vd")) && name[len(name)-1] >= 'a' && name[len(name)-1] <= 'z' {
+							whole = true
+						}
+						if !whole {
+							continue
+						}
+						var r, w uint64
+						fmt.Sscanf(f[5], "%d", &r)
+						fmt.Sscanf(f[9], "%d", &w)
+						rd += r
+						wr += w
+					}
+					now := time.Now()
+					if !m.prevDiskAt.IsZero() && rd >= m.prevDisk[0] {
+						dt := now.Sub(m.prevDiskAt).Seconds()
+						if dt > 0 {
+							msg.io = ioRates{
+								readBps:  float64(rd-m.prevDisk[0]) * 512 / dt,
+								writeBps: float64(wr-m.prevDisk[1]) * 512 / dt,
+							}
+						}
+					}
+					m.prevDisk = [2]uint64{rd, wr}
+					m.prevDiskAt = now
 				}
 				if len(parts) > 5 {
 					g := strings.TrimSpace(parts[5])
@@ -542,6 +592,8 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.gpu.probed {
 			m.gpu = msg.gpu
 		}
+		m.io = msg.io
+		m.swapT, m.swapU = msg.swapT, msg.swapU
 		m.err = ""
 		m.rebuildRows()
 		m.appendHist()

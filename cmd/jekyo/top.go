@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"crypto/x509"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"os"
 	"sort"
@@ -76,6 +78,8 @@ type topNode struct {
 type topSnapshot struct {
 	Context string      `json:"context"`
 	Time    string      `json:"time"`
+	APIMs    int64 `json:"apiLatencyMs"`
+	CertDays int   `json:"nearestCertExpiryDays"` // -1 when no certs found
 	Nodes   []topNode   `json:"nodes"`
 	Pods    []topPod    `json:"pods"`
 	Volumes []topVolume `json:"volumes,omitempty"`
@@ -159,10 +163,12 @@ func gatherTop(ctx context.Context, d *deploy.Deployer, contextName, app string)
 	if app != "" {
 		ns, sel = compile.NamespaceFor(app), podSelector(app, "")
 	}
+	apiStart := time.Now()
 	pods, err := d.Client.Typed.CoreV1().Pods(ns).List(ctx, metav1.ListOptions{LabelSelector: sel})
 	if err != nil {
 		return nil, err
 	}
+	apiMs := time.Since(apiStart).Milliseconds()
 
 	// usage by namespace/pod; metrics lag pod creation by up to a scrape
 	// interval, so missing entries render as zero rather than failing.
@@ -178,7 +184,25 @@ func gatherTop(ctx context.Context, d *deploy.Deployer, contextName, app string)
 		}
 	}
 
-	snap := &topSnapshot{Context: contextName, Time: time.Now().UTC().Format(time.RFC3339), takenAt: time.Now()}
+	snap := &topSnapshot{Context: contextName, Time: time.Now().UTC().Format(time.RFC3339), takenAt: time.Now(), APIMs: apiMs, CertDays: -1}
+
+	// nearest TLS certificate expiry across the cluster
+	if secs, err := d.Client.Typed.CoreV1().Secrets("").List(ctx, metav1.ListOptions{FieldSelector: "type=kubernetes.io/tls"}); err == nil {
+		for _, sec := range secs.Items {
+			block, _ := pem.Decode(sec.Data["tls.crt"])
+			if block == nil {
+				continue
+			}
+			cert, err := x509.ParseCertificate(block.Bytes)
+			if err != nil {
+				continue
+			}
+			days := int(time.Until(cert.NotAfter).Hours() / 24)
+			if snap.CertDays == -1 || days < snap.CertDays {
+				snap.CertDays = days
+			}
+		}
+	}
 
 	// kubelet stats summary: network counters, node disk, PVC usage.
 	podNet := map[string][2]int64{}
