@@ -373,16 +373,24 @@ func (m *uiModel) viewHeader() string {
 	// brand box: who we are, which version, whether a newer one exists
 	brandW := 24
 	cpuW -= brandW + 1
-	brandRows := make([]string, 0, 6)
-	for _, l := range uiLogo {
-		brandRows = append(brandRows, uiAccent.Bold(true).Render(l))
+	center := func(str string) string {
+		pad := (brandW - 4 - lipgloss.Width(str)) / 2
+		if pad < 0 {
+			pad = 0
+		}
+		return strings.Repeat(" ", pad) + str
 	}
-	brandRows = append(brandRows, uiDimStyle.Render("v")+version)
+	brandRows := []string{
+		"",
+		center(uiHdrStyle.Render("Stop doing ops.")),
+		"",
+		center(uiDimStyle.Render("v") + version),
+	}
 	if m.latest != "" && m.latest != "v"+version && version != "dev" {
-		brandRows = append(brandRows, uiAccent.Render(m.latest+" available"),
-			uiAccent.Render("run: jekyo update"))
+		brandRows = append(brandRows,
+			center(uiAccent.Render(m.latest+" available")),
+			center(uiAccent.Render("run: jekyo update")))
 	}
-	brandRows = append(brandRows, uiDimStyle.Render("Stop doing ops."))
 
 	platCol := boxWithTitle(btopTitle("⁰", "server"), "", platRows, platW) + "\n" +
 		boxWithTitle(btopTitle("⁶", "security"), "", secRows, platW)
