@@ -6,6 +6,16 @@ All notable changes to JEKYO are documented here. The format follows
 may contain breaking changes and patches never do. From 1.0 on, breaking
 changes only land in major versions.
 
+## [0.6.0] - 2026-08-01
+
+### Added
+
+- `jekyo ui` visual overhaul: the JEKYO wordmark and a boxed server
+  strip in the header, Nerd Font icons throughout (pass `--ascii` or
+  set `JEKYO_ASCII=1` on terminals without a patched font), a proper
+  tab bar, keycap-style footer, full-width row selection, and clearer
+  confirm and status banners.
+
 ## [0.5.0] - 2026-08-01
 
 ### Added

@@ -74,6 +74,7 @@ type confirmState struct {
 type uiModel struct {
 	d       *deploy.Deployer
 	ctxName string
+	icons   bool
 
 	width, height int
 	snap          *topSnapshot
@@ -458,7 +459,8 @@ func restartWorkloads(ctx context.Context, d *deploy.Deployer, app, svc string) 
 }
 
 func newUICmd() *cobra.Command {
-	return &cobra.Command{
+	var ascii bool
+	cmd := &cobra.Command{
 		Use:   "ui",
 		Short: "Interactive terminal UI: apps, live logs, metrics, one-key actions",
 		Long: "A lazydocker-style terminal UI. Navigate apps and services, watch live\n" +
@@ -479,15 +481,19 @@ func newUICmd() *cobra.Command {
 					name = meta.Name
 				}
 			}
-			return runUI(d, name)
+			return runUI(d, name, ascii)
 		},
 	}
+	cmd.Flags().BoolVar(&ascii, "ascii", false, "plain symbols instead of Nerd Font icons")
+	return cmd
 }
 
 // runUI starts the dashboard; jekyo top in a terminal lands here too.
-func runUI(d *deploy.Deployer, ctxName string) error {
+// Icons need a Nerd Font; --ascii or JEKYO_ASCII=1 turns them off.
+func runUI(d *deploy.Deployer, ctxName string, ascii bool) error {
 	m := &uiModel{
 		d: d, ctxName: ctxName,
+		icons:  !ascii && os.Getenv("JEKYO_ASCII") == "",
 		snap:   &topSnapshot{},
 		logs:   map[string][]string{},
 		hist:   map[string][]histPt{},
