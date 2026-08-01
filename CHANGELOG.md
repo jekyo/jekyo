@@ -6,6 +6,21 @@ All notable changes to JEKYO are documented here. The format follows
 may contain breaking changes and patches never do. From 1.0 on, breaking
 changes only land in major versions.
 
+## [0.7.0] - 2026-08-01
+
+### Added
+
+- `jekyo ui` shows the server's load average and uptime, read over SSH
+  per context (skipped gracefully when SSH is unavailable).
+
+### Changed
+
+- Calmer header, btop-style: identity (context, node, pods, uptime)
+  lives in the box border, the wordmark moved to the splash only, and
+  the two content rows group cpu/mem/load and disk/net.
+- Hotkey hints are no longer duplicated: tab keys live on the tabs,
+  the footer keeps movement and actions.
+
 ## [0.6.3] - 2026-08-01
 
 ### Fixed

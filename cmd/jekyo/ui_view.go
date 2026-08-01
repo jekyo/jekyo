@@ -158,7 +158,7 @@ func (m *uiModel) View() string {
 		leftW = m.width / 3
 	}
 	rightW := m.width - leftW - 6
-	headerH := 5 // 3 content lines + border
+	headerH := 4 // 2 content rows + border
 	bodyH := m.height - headerH - 3
 
 	header := m.viewHeader()
@@ -168,24 +168,26 @@ func (m *uiModel) View() string {
 	return header + "\n" + body + "\n" + m.viewFooter()
 }
 
-// viewHeader is the boxed btop-style server strip: the JEKYO wordmark on
-// the left, then identity, cpu/mem, and dsk/net gauge rows with history
-// sparklines.
+// viewHeader is the btop-style server strip. The box border carries the
+// identity (context, node, pods, uptime) so content rows stay for data:
+// cpu/mem/load on one line, disk/net on the next.
 func (m *uiModel) viewHeader() string {
-	w := m.width - 4
-	logo := uiAccent.Bold(true).Render(strings.Join(uiLogo, "\n"))
+	w := m.width - 2
+	title := " " + m.ic("server") + " " + m.ctxName
+	if len(m.snap.Nodes) > 0 {
+		n := m.snap.Nodes[0]
+		title += fmt.Sprintf(" · %s · %d pods", n.Name, n.PodCount)
+		if m.uptime != "" {
+			title += " · up " + m.uptime
+		}
+	}
+	title += " "
 
-	var info string
+	var rows []string
 	if len(m.snap.Nodes) == 0 {
-		info = m.ic("server") + " " + m.ctxName + "\n" + uiDimStyle.Render("connecting to the cluster...")
+		rows = []string{uiDimStyle.Render("connecting to the cluster...")}
 	} else {
 		n := m.snap.Nodes[0]
-		title := m.ic("server") + " " + uiHdrStyle.Render(m.ctxName) +
-			uiDimStyle.Render(fmt.Sprintf("  ·  %s  ·  %d pods", n.Name, n.PodCount))
-		if n.MetricsMissed {
-			title += "   " + uiRed.Render(m.ic("warn") + " metrics warming up")
-		}
-
 		var cpus, mems, rxs, txs []int64
 		var curRx, curTx float64
 		for _, h := range m.nodeHist {
@@ -197,23 +199,52 @@ func (m *uiModel) viewHeader() string {
 		if len(m.nodeHist) > 0 {
 			curRx, curTx = m.nodeHist[len(m.nodeHist)-1].rx, m.nodeHist[len(m.nodeHist)-1].tx
 		}
-
-		gap := strings.Repeat(" ", 6)
-		sw := 16
-		line2 := fmt.Sprintf("%s cpu %s %5.1f%%  %s%s%s mem %s %5.1f%%  %s",
-			m.ic("cpu"), bar(n.CPUPct, 14), n.CPUPct, uiAccent.Render(sparkline(cpus, sw)),
+		gap := "    "
+		load := ""
+		if m.load != "" {
+			load = gap + uiDimStyle.Render("load ") + m.load
+		}
+		row1 := fmt.Sprintf("%s %s %5.1f%% %s%s%s %s %5.1f%% %-15s %s%s",
+			uiDimStyle.Render("cpu"), bar(n.CPUPct, 12), n.CPUPct, uiAccent.Render(sparkline(cpus, 12)),
 			gap,
-			m.ic("mem"), bar(n.MemPct, 14), n.MemPct, uiGreen.Render(sparkline(mems, sw)))
-		line3 := fmt.Sprintf("%s dsk %s %5.1f%%  %-17s%s%s net ↓ %-8s %s  ↑ %-8s %s",
-			m.ic("disk"), bar(n.DiskPct, 14), n.DiskPct,
-			fmt.Sprintf("(%s/%s)", fmtMem(n.DiskUsed), fmtMem(n.DiskCap)),
+			uiDimStyle.Render("mem"), bar(n.MemPct, 12), n.MemPct,
+			uiDimStyle.Render(fmt.Sprintf("(%s/%s)", fmtMem(n.MemBytes), fmtMem(n.MemCapBytes))),
+			uiGreen.Render(sparkline(mems, 12)), load)
+		row2 := fmt.Sprintf("%s %s %5.1f%% %-15s%s%s ↓ %-8s %s  ↑ %-8s %s",
+			uiDimStyle.Render("dsk"), bar(n.DiskPct, 12), n.DiskPct,
+			uiDimStyle.Render(fmt.Sprintf("(%s/%s)", fmtMem(n.DiskUsed), fmtMem(n.DiskCap))),
 			gap,
-			m.ic("net"), fmtRate(curRx), uiAccent.Render(sparkline(rxs, 10)),
+			uiDimStyle.Render("net"), fmtRate(curRx), uiAccent.Render(sparkline(rxs, 10)),
 			fmtRate(curTx), uiGreen.Render(sparkline(txs, 10)))
-		info = title + "\n" + line2 + "\n" + line3
+		if n.MetricsMissed {
+			row1 += "  " + uiRed.Render(m.ic("warn")+" metrics warming up")
+		}
+		rows = []string{row1, row2}
 	}
-	inner := lipgloss.JoinHorizontal(lipgloss.Center, logo, "    ", info)
-	return uiPane.Width(w).Render(inner)
+	return boxWithTitle(uiHdrStyle.Render(title), rows, w)
+}
+
+// boxWithTitle draws a rounded box whose top border embeds the title,
+// btop-style, so the header spends no content row on identity.
+func boxWithTitle(title string, rows []string, w int) string {
+	inner := w - 2
+	tw := lipgloss.Width(title)
+	rest := inner - tw - 1
+	if rest < 0 {
+		rest = 0
+	}
+	bs := uiDimStyle
+	var b strings.Builder
+	b.WriteString(bs.Render("╭─") + title + bs.Render(strings.Repeat("─", rest)+"╮") + "\n")
+	for _, r := range rows {
+		pad := inner - lipgloss.Width(r) - 1
+		if pad < 0 {
+			pad = 0
+		}
+		b.WriteString(bs.Render("│") + " " + r + strings.Repeat(" ", pad) + bs.Render("│") + "\n")
+	}
+	b.WriteString(bs.Render("╰" + strings.Repeat("─", inner) + "╯"))
+	return b.String()
 }
 
 func (m *uiModel) viewTree(w, h int) string {
@@ -407,7 +438,7 @@ func (m *uiModel) viewFooter() string {
 			Padding(0, 1).Render(m.confirm.prompt)
 	}
 	keys := []struct{ k, label string }{
-		{"j/k", "move"}, {"l", "logs"}, {"m", "metrics"}, {"s", "status"},
+		{"j/k", "move"},
 		{"r", "restart"}, {"b", "rollback"}, {"e", "exec"}, {"a", "attach"}, {"q", "quit"},
 	}
 	parts := make([]string, len(keys))

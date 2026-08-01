@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"sort"
+	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -18,11 +19,16 @@ import (
 	"github.com/jekyo/jekyo/internal/compile"
 	"github.com/jekyo/jekyo/internal/contexts"
 	"github.com/jekyo/jekyo/internal/deploy"
+	"github.com/jekyo/jekyo/internal/sshx"
 )
 
 // ---- messages ----
 
-type snapMsg struct{ snap *topSnapshot }
+type snapMsg struct {
+	snap   *topSnapshot
+	load   string // "3.89 4.14 4.49" or empty
+	uptime string // "12d" or empty
+}
 type snapErrMsg struct{ err error }
 type tickMsg struct{}
 type logLineMsg struct {
@@ -75,6 +81,7 @@ type uiModel struct {
 	d       *deploy.Deployer
 	ctxName string
 	nerd    bool
+	sshc    *sshx.Client // best-effort; load average and uptime
 
 	width, height int
 	snap          *topSnapshot
@@ -92,6 +99,9 @@ type uiModel struct {
 	prevSnap *topSnapshot
 	events   map[string][]string
 
+	load   string
+	uptime string
+
 	confirm *confirmState
 	status  string // one-line footer notice
 	err     string
@@ -107,7 +117,33 @@ func (m *uiModel) gatherCmd() tea.Cmd {
 		if err != nil {
 			return snapErrMsg{err}
 		}
-		return snapMsg{snap}
+		msg := snapMsg{snap: snap}
+		if m.sshc != nil {
+			if out, err := m.sshc.Run("cat /proc/loadavg /proc/uptime 2>/dev/null"); err == nil {
+				lines := strings.Split(strings.TrimSpace(out), "\n")
+				if len(lines) > 0 {
+					if f := strings.Fields(lines[0]); len(f) >= 3 {
+						msg.load = f[0] + " " + f[1] + " " + f[2]
+					}
+				}
+				if len(lines) > 1 {
+					if f := strings.Fields(lines[1]); len(f) > 0 {
+						var secs float64
+						fmt.Sscanf(f[0], "%f", &secs)
+						d := time.Duration(secs) * time.Second
+						switch {
+						case d >= 48*time.Hour:
+							msg.uptime = fmt.Sprintf("%dd", int(d.Hours()/24))
+						case d >= 2*time.Hour:
+							msg.uptime = fmt.Sprintf("%dh", int(d.Hours()))
+						default:
+							msg.uptime = fmt.Sprintf("%dm", int(d.Minutes()))
+						}
+					}
+				}
+			}
+		}
+		return msg
 	}
 }
 
@@ -355,6 +391,12 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case snapMsg:
 		m.snap = msg.snap
+		if msg.load != "" {
+			m.load = msg.load
+		}
+		if msg.uptime != "" {
+			m.uptime = msg.uptime
+		}
 		m.err = ""
 		m.rebuildRows()
 		m.appendHist()
@@ -492,8 +534,17 @@ func newUICmd() *cobra.Command {
 // Default icons are plain Unicode that render in any monospace font;
 // --nerd or JEKYO_NERD=1 switches to Nerd Font glyphs.
 func runUI(d *deploy.Deployer, ctxName string, nerd bool) error {
+	// best-effort SSH for load average and uptime; the UI works without it
+	var sshc *sshx.Client
+	if store, err := contexts.Open(); err == nil {
+		if meta, err := store.Resolve(contextFlag); err == nil {
+			if c, err := sshx.Dial(meta.SSH, sshx.Options{KeyPath: sshKeyFlag}); err == nil {
+				sshc = c
+			}
+		}
+	}
 	m := &uiModel{
-		d: d, ctxName: ctxName,
+		d: d, ctxName: ctxName, sshc: sshc,
 		nerd:   nerd || os.Getenv("JEKYO_NERD") != "",
 		snap:   &topSnapshot{},
 		logs:   map[string][]string{},
