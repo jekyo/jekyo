@@ -6,6 +6,14 @@ All notable changes to JEKYO are documented here. The format follows
 may contain breaking changes and patches never do. From 1.0 on, breaking
 changes only land in major versions.
 
+## [0.16.2] - 2026-08-01
+
+### Fixed
+
+- The per-service metrics strip in `jekyo ui` no longer disappears on
+  terminals around 36 rows; the height gate was off by the header's
+  growth.
+
 ## [0.16.1] - 2026-08-01
 
 ### Fixed

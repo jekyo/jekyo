@@ -601,7 +601,7 @@ func (m *uiModel) viewRight(w, h int) string {
 
 	strip := ""
 	stripH := 0
-	if m.graphs && ok && h > 14 {
+	if m.graphs && ok && h >= 12 {
 		strip = m.viewMetricStrip(key, w)
 		stripH = lipgloss.Height(strip)
 	}
