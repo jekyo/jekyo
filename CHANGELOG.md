@@ -6,6 +6,19 @@ All notable changes to JEKYO are documented here. The format follows
 may contain breaking changes and patches never do. From 1.0 on, breaking
 changes only land in major versions.
 
+## [0.16.0] - 2026-08-01
+
+### Added
+
+- `jekyo update` verifies downloads against the release's sha256
+  checksums before installing.
+
+### Changed
+
+- Dead code removed and internals tidied; the security policy documents
+  the registry credential's brief visibility in server process
+  arguments during image delivery.
+
 ## [0.15.3] - 2026-08-01
 
 ### Added

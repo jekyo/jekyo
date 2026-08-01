@@ -96,7 +96,7 @@ func Compile(app *dsl.App, opts Options) ([]runtime.Object, error) {
 			continue
 		}
 		if svc.Image == "" {
-			return nil, fmt.Errorf("service %s: build: must be resolved before compile (internal error) — or use image:", name)
+			return nil, fmt.Errorf("service %s: build must be resolved before compile (internal error)", name)
 		}
 		workload, err := workload(app, name, svc, len(pull) > 0, shared)
 		if err != nil {

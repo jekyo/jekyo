@@ -57,11 +57,11 @@ type Service struct {
 	// Schedule turns the service into a CronJob (cron syntax, e.g.
 	// "0 3 * * *"): image/build + command run on that schedule. Mutually
 	// exclusive with http, replicas, and volumes.
-	Schedule string `yaml:"schedule"`
-	Replicas  *int      `yaml:"replicas"`
-	Stateful  *bool     `yaml:"stateful"`
-	Health    *Health   `yaml:"health"`
-	GPU       GPU       `yaml:"gpu"`
+	Schedule string  `yaml:"schedule"`
+	Replicas *int    `yaml:"replicas"`
+	Stateful *bool   `yaml:"stateful"`
+	Health   *Health `yaml:"health"`
+	GPU      GPU     `yaml:"gpu"`
 	// Volumes maps a volume name (declared top-level) to a mount: either
 	// a plain path string or {path, subpath} to share one volume between
 	// services.

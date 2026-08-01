@@ -25,17 +25,17 @@ type CheckResult struct {
 
 // Config carries the install parameters preflight needs.
 type Config struct {
-	IP           string
-	StoragePath  string
-	Domain       string
-	AcmeEmail    string
+	IP             string
+	StoragePath    string
+	Domain         string
+	AcmeEmail      string
 	InternalDomain string
-	NoVPN        bool
-	NoGPU        bool
-	NoRegistry   bool
-	Fix          bool
-	RemoveDocker bool
-	K3sVersion   string
+	NoVPN          bool
+	NoGPU          bool
+	NoRegistry     bool
+	Fix            bool
+	RemoveDocker   bool
+	K3sVersion     string
 }
 
 // k3s-owned processes that legitimately hold our ports on an existing install.

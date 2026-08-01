@@ -179,7 +179,7 @@ services:
       context: .
 `
 	_, err := Compile(mustParse(t, y), Options{})
-	if err == nil || !strings.Contains(err.Error(), "build: must be resolved") {
+	if err == nil || !strings.Contains(err.Error(), "build must be resolved") {
 		t.Fatalf("want build rejection, got: %v", err)
 	}
 }

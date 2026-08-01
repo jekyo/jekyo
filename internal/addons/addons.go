@@ -28,8 +28,8 @@ const RegistryHost = "registry.jekyo.local"
 
 // Values parameterizes the addon templates.
 type Values struct {
-	Domain    string // base domain; empty disables kcert + external ingresses
-	AcmeEmail string
+	Domain     string // base domain; empty disables kcert + external ingresses
+	AcmeEmail  string
 	AcmeDirURL string // Let's Encrypt production by default; staging for tests
 
 	RegistryUser      string

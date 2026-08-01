@@ -51,11 +51,11 @@ type topPod struct {
 }
 
 type topBackup struct {
-	App         string `json:"app"`
-	Volume      string `json:"volume"`
-	Schedule    string `json:"schedule"`
-	LastAgeSec  int64  `json:"lastSuccessAgeSeconds"` // -1 = never
-	Overdue     bool   `json:"overdue"`
+	App        string `json:"app"`
+	Volume     string `json:"volume"`
+	Schedule   string `json:"schedule"`
+	LastAgeSec int64  `json:"lastSuccessAgeSeconds"` // -1 = never
+	Overdue    bool   `json:"overdue"`
 }
 
 // cronInterval estimates a cron schedule's period for freshness checks.
@@ -105,17 +105,17 @@ type topNode struct {
 }
 
 type topSnapshot struct {
-	Context string      `json:"context"`
-	Time    string      `json:"time"`
-	APIMs    int64 `json:"apiLatencyMs"`
-	CertDays int   `json:"nearestCertExpiryDays"` // -1 when no certs found
-	Services int   `json:"services"`
-	Domains  int   `json:"domains"`
+	Context  string      `json:"context"`
+	Time     string      `json:"time"`
+	APIMs    int64       `json:"apiLatencyMs"`
+	CertDays int         `json:"nearestCertExpiryDays"` // -1 when no certs found
+	Services int         `json:"services"`
+	Domains  int         `json:"domains"`
 	Backups  []topBackup `json:"backups,omitempty"`
-	Nodes   []topNode   `json:"nodes"`
-	Pods    []topPod    `json:"pods"`
-	Volumes []topVolume `json:"volumes,omitempty"`
-	takenAt time.Time
+	Nodes    []topNode   `json:"nodes"`
+	Pods     []topPod    `json:"pods"`
+	Volumes  []topVolume `json:"volumes,omitempty"`
+	takenAt  time.Time
 }
 
 // statsSummary is the subset of the kubelet stats summary API we read
@@ -243,9 +243,9 @@ func gatherTop(ctx context.Context, d *deploy.Deployer, contextName, app string)
 	if cjs, err := d.Client.Typed.BatchV1().CronJobs("").List(ctx, metav1.ListOptions{LabelSelector: "jekyo.io/backup=true"}); err == nil {
 		for _, cj := range cjs.Items {
 			b := topBackup{
-				App:      strings.TrimPrefix(cj.Namespace, "jekyo-"),
-				Volume:   cj.Labels["jekyo.io/volume"],
-				Schedule: cj.Spec.Schedule,
+				App:        strings.TrimPrefix(cj.Namespace, "jekyo-"),
+				Volume:     cj.Labels["jekyo.io/volume"],
+				Schedule:   cj.Spec.Schedule,
 				LastAgeSec: -1,
 			}
 			iv := cronInterval(cj.Spec.Schedule)

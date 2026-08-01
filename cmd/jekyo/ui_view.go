@@ -11,7 +11,6 @@ import (
 var (
 	uiAmber  = lipgloss.Color("214")
 	uiDim    = lipgloss.Color("240")
-	uiFaint  = lipgloss.Color("236")
 	uiGood   = lipgloss.Color("42")
 	uiBad    = lipgloss.Color("196")
 	uiText   = lipgloss.Color("252")
@@ -27,8 +26,7 @@ var (
 
 	uiPane = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(uiDim).Padding(0, 1)
 
-	uiTabOn  = lipgloss.NewStyle().Foreground(uiAmber).Bold(true).Padding(0, 1).Border(lipgloss.RoundedBorder(), false, false, true, false).BorderForeground(uiAmber)
-	uiTabOff = lipgloss.NewStyle().Foreground(uiDim).Padding(0, 1)
+	uiTabOn = lipgloss.NewStyle().Foreground(uiAmber).Bold(true).Padding(0, 1).Border(lipgloss.RoundedBorder(), false, false, true, false).BorderForeground(uiAmber)
 
 	uiKey   = lipgloss.NewStyle().Foreground(uiAmber)
 	uiLabel = lipgloss.NewStyle().Foreground(uiDim)
@@ -64,13 +62,6 @@ func (m *uiModel) ic(name string) string {
 		return nfIcons[name]
 	}
 	return baseIcons[name]
-}
-
-// uiLogo is the 3-line JEKYO wordmark drawn with box glyphs.
-var uiLogo = []string{
-	" ┓ ┏┓ ┓┏ ┓┏ ┏┓",
-	" ┃ ┣  ┣┫ ┗┫ ┃┃",
-	"┗┛ ┗┛ ┛┗  ┛ ┗┛",
 }
 
 // uiSplash is the JEKYO logomark on a starfield, shown while the first

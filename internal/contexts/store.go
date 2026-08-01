@@ -19,8 +19,8 @@ import (
 // Meta describes one context (one server).
 type Meta struct {
 	Name      string    `json:"name" yaml:"name"`
-	SSH       string    `json:"ssh" yaml:"ssh"`             // user@host[:port] used at install time
-	IP        string    `json:"ip" yaml:"ip"`               // public IP the cluster advertises
+	SSH       string    `json:"ssh" yaml:"ssh"` // user@host[:port] used at install time
+	IP        string    `json:"ip" yaml:"ip"`   // public IP the cluster advertises
 	Domain    string    `json:"domain,omitempty" yaml:"domain,omitempty"`
 	Storage   string    `json:"storage,omitempty" yaml:"storage,omitempty"` // local-path root on the server
 	Arch      string    `json:"arch,omitempty" yaml:"arch,omitempty"`       // x86_64 | aarch64; picks the build platform

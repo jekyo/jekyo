@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -8,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -87,12 +90,23 @@ func newUpdateCmd() *cobra.Command {
 				return fmt.Errorf("%w\nre-run with sudo: sudo jekyo update", err)
 			}
 			defer os.Remove(tmp.Name())
-			if _, err := io.Copy(tmp, resp.Body); err != nil {
+			hash := sha256.New()
+			if _, err := io.Copy(io.MultiWriter(tmp, hash), resp.Body); err != nil {
 				tmp.Close()
 				return err
 			}
 			if err := tmp.Close(); err != nil {
 				return err
+			}
+
+			// verify against the release's checksums.txt before installing
+			asset := fmt.Sprintf("jekyo-%s-%s", runtime.GOOS, runtime.GOARCH)
+			want, err := releaseChecksum(client, tag, asset)
+			if err != nil {
+				return fmt.Errorf("fetching checksums: %w", err)
+			}
+			if got := hex.EncodeToString(hash.Sum(nil)); got != want {
+				return fmt.Errorf("checksum mismatch for %s: got %s want %s (refusing to install)", asset, got, want)
 			}
 			if err := os.Chmod(tmp.Name(), 0o755); err != nil {
 				return err
@@ -104,4 +118,28 @@ func newUpdateCmd() *cobra.Command {
 			return nil
 		},
 	}
+}
+
+// releaseChecksum reads the sha256 for one asset from the release's
+// checksums.txt.
+func releaseChecksum(client *http.Client, tag, asset string) (string, error) {
+	resp, err := client.Get(fmt.Sprintf("%s/download/%s/checksums.txt", releaseBase, tag))
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return "", fmt.Errorf("checksums.txt: %s", resp.Status)
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return "", err
+	}
+	for _, line := range strings.Split(string(body), "\n") {
+		f := strings.Fields(line)
+		if len(f) == 2 && f[1] == asset {
+			return f[0], nil
+		}
+	}
+	return "", fmt.Errorf("no checksum listed for %s", asset)
 }

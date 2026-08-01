@@ -27,17 +27,17 @@ import (
 // ---- messages ----
 
 type snapMsg struct {
-	snap   *topSnapshot
-	load   string // "3.89 4.14 4.49" or empty
-	uptime string // "12d" or empty
-	cores  []float64  // per-core utilization 0-100
-	mounts []mountRow // real filesystems with usage
-	tempC  int        // package temperature, 0 = unknown
-	mem    memInfo
-	gpu    gpuInfo
-	io     ioRates
-	swapT  int64
-	swapU  int64
+	snap     *topSnapshot
+	load     string     // "3.89 4.14 4.49" or empty
+	uptime   string     // "12d" or empty
+	cores    []float64  // per-core utilization 0-100
+	mounts   []mountRow // real filesystems with usage
+	tempC    int        // package temperature, 0 = unknown
+	mem      memInfo
+	gpu      gpuInfo
+	io       ioRates
+	swapT    int64
+	swapU    int64
 	updTotal int
 	updSec   int
 	reboot   bool
@@ -49,8 +49,8 @@ type ioRates struct {
 }
 
 type gpuInfo struct {
-	present                    bool
-	probed                     bool
+	present                     bool
+	probed                      bool
 	util, memUsed, memTot, temp int
 }
 
@@ -133,25 +133,25 @@ type uiModel struct {
 	prevSnap *topSnapshot
 	events   map[string][]string
 
-	graphs   bool
-	latest   string
-	load     string
-	uptime   string
-	cores    []float64
-	mounts   []mountRow
-	tempC    int
-	mem      memInfo
-	gpu      gpuInfo
-	io       ioRates
-	updTotal int
-	updSec   int
-	reboot   bool
-	sshFails int
-	swapT    int64
-	swapU    int64
-	prevDisk [2]uint64 // cumulative sectors read/written
+	graphs     bool
+	latest     string
+	load       string
+	uptime     string
+	cores      []float64
+	mounts     []mountRow
+	tempC      int
+	mem        memInfo
+	gpu        gpuInfo
+	io         ioRates
+	updTotal   int
+	updSec     int
+	reboot     bool
+	sshFails   int
+	swapT      int64
+	swapU      int64
+	prevDisk   [2]uint64 // cumulative sectors read/written
 	prevDiskAt time.Time
-	prevStat map[int][2]uint64 // per-core total/idle counters
+	prevStat   map[int][2]uint64 // per-core total/idle counters
 
 	confirm *confirmState
 	status  string // one-line footer notice

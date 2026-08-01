@@ -35,4 +35,9 @@ to the reporter in the changelog, unless you prefer to stay anonymous.
 - Generated secrets (registry, VPN, backups) are stored as Kubernetes
   Secrets on your own cluster.
 - The one-line installer downloads release binaries from GitHub over
-  HTTPS. Reports about the integrity of that path are in scope.
+  HTTPS, and `jekyo update` additionally verifies the release's sha256
+  checksums. Reports about the integrity of that path are in scope.
+- Known limitation: during image delivery the registry credential
+  briefly appears in a process argument on your own server (visible
+  only to users already on that machine). Treat shell access to the
+  server as equivalent to registry access.
