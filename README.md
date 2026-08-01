@@ -1,10 +1,11 @@
 # JEKYO
 
-**Stop doing ops.** JEKYO turns a $50 server into your own cloud: one
+**Stop doing ops.** JEKYO turns any server into your own cloud: one
 command installs a batteries-included Kubernetes cluster, one `jekyo.yaml`
-describes an app end to end — build, domains, TLS, volumes, GPUs. Same
-benefits as managed cloud at a tenth of the cost, and built to be operated
-by AI agents: your DevOps team is `/jekyo deploy this`.
+describes an app end to end — build, domains, TLS, volumes, GPUs. Clouds
+bill per app, per database, per GPU-hour; a server bills once. And JEKYO
+is built to be operated by AI agents — your DevOps team is
+`/jekyo deploy this`.
 
 ```sh
 jekyo server install root@1.2.3.4 --ip 1.2.3.4 --storage /storage \
