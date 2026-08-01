@@ -1,6 +1,7 @@
 package provision
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"strings"
@@ -94,8 +95,15 @@ func (in *Installer) Install(f Facts, creds Credentials) error {
 	vpn := !cfg.NoVPN && f.Wireguard
 
 	// containerd registry config must exist before k3s starts.
+	registriesChanged := false
 	if err := in.step("configuring containerd registry mirror", func() error {
-		return in.SSH.WriteFile(registriesPath, []byte(addons.RegistriesYAML(creds.RegistryUser, creds.RegistryPassword)), "0600")
+		desired := []byte(addons.RegistriesYAML(creds.RegistryUser, creds.RegistryPassword))
+		current, _ := in.SSH.ReadFile(registriesPath)
+		registriesChanged = !bytes.Equal(current, desired)
+		if !registriesChanged {
+			return nil
+		}
+		return in.SSH.WriteFile(registriesPath, desired, "0600")
 	}); err != nil {
 		return err
 	}
@@ -130,6 +138,17 @@ func (in *Installer) Install(f Facts, creds Credentials) error {
 		return err
 	}); err != nil {
 		return err
+	}
+
+	// registries.yaml is only read at startup: when a converge changed it on
+	// a server where k3s was already running, restart so containerd sees it.
+	if registriesChanged && f.K3sVersion != "" {
+		if err := in.step("restarting k3s for registry config", func() error {
+			_, err := in.SSH.Run("systemctl restart k3s")
+			return err
+		}); err != nil {
+			return err
+		}
 	}
 
 	if err := in.step("waiting for node ready", func() error {

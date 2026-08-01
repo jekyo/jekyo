@@ -125,7 +125,11 @@ func RegistriesYAML(user, password string) string {
 	fmt.Fprintf(&b, "  %q:\n", RegistryHost)
 	fmt.Fprintf(&b, "    endpoint:\n      - \"http://%s:5000\"\n", RegistryClusterIP)
 	fmt.Fprintf(&b, "configs:\n")
-	fmt.Fprintf(&b, "  %q:\n", RegistryHost)
-	fmt.Fprintf(&b, "    auth:\n      username: %q\n      password: %q\n", user, password)
+	// containerd matches credentials against the endpoint host once the
+	// mirror rewrite happens, so auth must be keyed by both names.
+	for _, host := range []string{RegistryHost, RegistryClusterIP + ":5000"} {
+		fmt.Fprintf(&b, "  %q:\n", host)
+		fmt.Fprintf(&b, "    auth:\n      username: %q\n      password: %q\n", user, password)
+	}
 	return b.String()
 }

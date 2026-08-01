@@ -6,6 +6,24 @@ All notable changes to JEKYO are documented here. The format follows
 may contain breaking changes and patches never do. From 1.0 on, breaking
 changes only land in major versions.
 
+## [0.2.1] - 2026-08-01
+
+Fixes found while validating JEKYO on real hardware with a public domain,
+migrating a production docker-compose server.
+
+### Fixed
+
+- Pods in app namespaces can now pull images pushed to the private
+  registry. containerd matches registry credentials against the endpoint
+  host after the mirror rewrite, so auth is keyed by both
+  `registry.jekyo.local` and the in-cluster address.
+- `jekyo server install` restarts k3s when a converge changes the
+  registry configuration; containerd only reads it at startup.
+- Automatic TLS certificates are actually issued now. kcert ran with two
+  wrong defaults: it looked for itself in the `kcert` namespace (RBAC
+  denied) and created ACME challenge ingresses with class `nginx`, which
+  Envoy ignores. First real Let's Encrypt issuance verified end to end.
+
 ## [0.2.0] - 2026-08-01
 
 ### Added

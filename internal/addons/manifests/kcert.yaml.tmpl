@@ -86,6 +86,14 @@ spec:
             - containerPort: 8080
               name: http-admin
           env:
+            # kcert defaults its own namespace to "kcert"; it must match
+            # where this Deployment lives or challenge ingresses hit RBAC.
+            - name: KCERT__NAMESPACE
+              value: kube-system
+            # the ACME challenge ingress defaults to class "nginx"; it must
+            # be contour or Envoy never routes the validation request.
+            - name: CHALLENGEINGRESS__CLASSNAME
+              value: contour
             - name: ACME__DIRURL
               value: "{{ .AcmeDirURL }}"
             - name: ACME__TERMSACCEPTED
