@@ -1,0 +1,8 @@
+app: whoami
+services:
+  web:
+    image: traefik/whoami:v1.10
+    port: 80
+    http:
+      domain: whoami.test
+      tls: false

@@ -1,0 +1,8 @@
+# NVIDIA RuntimeClass — applied only when a GPU is detected. k3s auto-detects
+# the nvidia container runtime once nvidia-container-toolkit is installed and
+# wires it into its embedded containerd; this makes it schedulable.
+apiVersion: node.k8s.io/v1
+kind: RuntimeClass
+metadata:
+  name: nvidia
+handler: nvidia

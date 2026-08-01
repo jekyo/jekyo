@@ -1,0 +1,12 @@
+app: mysite
+description: Static site served by nginx, built from the ./public directory
+services:
+  web:
+    build:
+      context: .
+      inline: |
+        FROM nginx:alpine
+        COPY public/ /usr/share/nginx/html/
+    port: 80
+    http:
+      domain: example.com

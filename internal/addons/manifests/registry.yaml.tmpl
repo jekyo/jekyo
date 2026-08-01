@@ -1,0 +1,106 @@
+# Private registry, reachable:
+#  - in-cluster from any namespace as registry.jekyo.local (containerd
+#    registries.yaml rewrites to the fixed ClusterIP below, with auth)
+#  - from outside at registry.<domain> (TLS via kcert, same htpasswd auth),
+#    or via `jekyo`-managed port-forward when no domain is configured.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: registry-auth
+  namespace: kube-system
+type: Opaque
+stringData:
+  htpasswd: "{{ .RegistryUser }}:{{ .RegistryHtpasswd }}"
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: registry
+  namespace: kube-system
+spec:
+  selector:
+    matchLabels:
+      app: registry
+  serviceName: registry
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: registry
+    spec:
+      terminationGracePeriodSeconds: 5
+      containers:
+        - name: registry
+          image: registry:2.8.3
+          ports:
+            - containerPort: 5000
+              name: api
+          env:
+            - name: REGISTRY_AUTH
+              value: htpasswd
+            - name: REGISTRY_AUTH_HTPASSWD_REALM
+              value: jekyo-registry
+            - name: REGISTRY_AUTH_HTPASSWD_PATH
+              value: /auth/htpasswd
+            - name: REGISTRY_STORAGE_DELETE_ENABLED
+              value: "true"
+          volumeMounts:
+            - name: registry
+              mountPath: /var/lib/registry
+            - name: auth
+              mountPath: /auth
+              readOnly: true
+      volumes:
+        - name: auth
+          secret:
+            secretName: registry-auth
+  volumeClaimTemplates:
+    - metadata:
+        name: registry
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: {{ .RegistrySize }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: registry
+  namespace: kube-system
+spec:
+  selector:
+    app: registry
+  type: ClusterIP
+  clusterIP: {{ .RegistryClusterIP }}
+  ports:
+    - name: registry
+      protocol: TCP
+      port: 5000
+      targetPort: 5000
+{{- if .Domain }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: registry
+  namespace: kube-system
+  labels:
+    kcert.dev/ingress: "managed"
+spec:
+  tls:
+    - hosts:
+        - registry.{{ .Domain }}
+      secretName: registry-tls
+  rules:
+    - host: registry.{{ .Domain }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: registry
+                port:
+                  number: 5000
+{{- end }}

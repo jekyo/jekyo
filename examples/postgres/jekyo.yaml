@@ -1,0 +1,17 @@
+# Postgres with pgvector and persistent storage. Reachable inside the
+# cluster at postgres.pg.svc:5432 (or just "postgres" from the same app).
+app: pg
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    env:
+      POSTGRES_PASSWORD: ${PG_PASSWORD}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    port: 5432
+    volumes:
+      pgdata: /var/lib/postgresql/data
+    resources:
+      memory: 256Mi
+volumes:
+  pgdata:
+    size: 5Gi

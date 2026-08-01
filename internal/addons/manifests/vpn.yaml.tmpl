@@ -1,0 +1,125 @@
+# wg-easy v14 (pinned; v15 changed to UI-driven config) — WireGuard VPN into
+# the cluster network. Client DNS is CoreDNS so *.svc.cluster.local resolves
+# through the tunnel. Requires --kubelet-arg=allowed-unsafe-sysctls=net.*.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: vpn
+  namespace: kube-system
+spec:
+  selector:
+    matchLabels:
+      app: vpn
+  serviceName: vpn
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: vpn
+    spec:
+      securityContext:
+        sysctls:
+          - name: net.ipv4.conf.all.src_valid_mark
+            value: "1"
+          - name: net.ipv4.ip_forward
+            value: "1"
+      containers:
+        - name: vpn
+          image: ghcr.io/wg-easy/wg-easy:14
+          securityContext:
+            capabilities:
+              add: ["NET_ADMIN", "SYS_MODULE"]
+            privileged: true
+          env:
+            - name: LANG
+              value: en
+            - name: WG_HOST
+              value: "{{ .VPNHost }}"
+            - name: WG_DEFAULT_DNS
+              value: "{{ .ClusterDNS }}"
+            - name: WG_MTU
+              value: "1320"
+            - name: PASSWORD_HASH
+              value: "{{ .VPNPasswordHash }}"
+            - name: PORT
+              value: "51821"
+            - name: WG_PORT
+              value: "31820"
+            - name: WG_POST_UP
+              value: "iptables -A FORWARD -i wg0 -j ACCEPT; iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE"
+            - name: WG_POST_DOWN
+              value: "iptables -D FORWARD -i wg0 -j ACCEPT; iptables -t nat -D POSTROUTING -o eth0 -j MASQUERADE"
+          ports:
+            - containerPort: 31820
+              protocol: UDP
+              name: wg
+            - containerPort: 51821
+              protocol: TCP
+              name: web
+          volumeMounts:
+            - name: vpn
+              mountPath: /etc/wireguard
+  volumeClaimTemplates:
+    - metadata:
+        name: vpn
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vpn-wg
+  namespace: kube-system
+spec:
+  selector:
+    app: vpn
+  type: NodePort
+  ports:
+    - protocol: UDP
+      name: wg
+      port: 31820
+      targetPort: 31820
+      nodePort: 31820
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vpn-admin
+  namespace: kube-system
+spec:
+  selector:
+    app: vpn
+  ports:
+    - protocol: TCP
+      name: web
+      port: 51821
+      targetPort: 51821
+{{- if .Domain }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: vpn
+  namespace: kube-system
+  labels:
+    kcert.dev/ingress: "managed"
+spec:
+  tls:
+    - hosts:
+        - vpn.{{ .Domain }}
+      secretName: vpn-tls
+  rules:
+    - host: vpn.{{ .Domain }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: vpn-admin
+                port:
+                  number: 51821
+{{- end }}

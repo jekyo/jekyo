@@ -1,0 +1,154 @@
+// Package dsl defines and parses jekyo.yaml — one file describing an app's
+// services end to end: image or build steps, runtime config, HTTP routing,
+// volumes, GPU. Compose-inspired, Kubernetes-honest (see SPEC.md §3).
+package dsl
+
+import (
+	"fmt"
+)
+
+// App is the root of a jekyo.yaml.
+type App struct {
+	Name string `yaml:"app"`
+	// Description and Icon are catalog/dashboard metadata (SPEC §4.1).
+	Description string             `yaml:"description"`
+	Icon        string             `yaml:"icon"`
+	Services    map[string]Service `yaml:"services"`
+	Volumes     map[string]Volume  `yaml:"volumes"`
+}
+
+type Service struct {
+	Image   string   `yaml:"image"`
+	Build   *Build   `yaml:"build"`
+	Command []string `yaml:"command"`
+	Args    []string `yaml:"args"`
+
+	Env  map[string]string `yaml:"env"`
+	Port int               `yaml:"port"`
+	// Ports lists container ports when a service exposes several; Port is
+	// sugar for a one-element list. The first port is the "main" port used
+	// as the default HTTP/probe target.
+	Ports []int `yaml:"ports"`
+
+	HTTP      *HTTP     `yaml:"http"`
+	Expose    []Expose  `yaml:"expose"`
+	Resources Resources `yaml:"resources"`
+	// Schedule turns the service into a CronJob (cron syntax, e.g.
+	// "0 3 * * *"): image/build + command run on that schedule. Mutually
+	// exclusive with http, replicas, and volumes.
+	Schedule string `yaml:"schedule"`
+	Replicas  *int      `yaml:"replicas"`
+	Stateful  *bool     `yaml:"stateful"`
+	Health    *Health   `yaml:"health"`
+	GPU       GPU       `yaml:"gpu"`
+	// Volumes maps a volume name (declared top-level) to a mount path.
+	Volumes map[string]string `yaml:"volumes"`
+}
+
+type Build struct {
+	Context    string            `yaml:"context"`
+	Dockerfile string            `yaml:"dockerfile"`
+	Inline     string            `yaml:"inline"`
+	Args       map[string]string `yaml:"args"`
+}
+
+type HTTP struct {
+	Domain string `yaml:"domain"`
+	Path   string `yaml:"path"`
+	// TLS defaults to true; certificates are issued automatically when the
+	// server was installed with a domain.
+	TLS  *bool  `yaml:"tls"`
+	Auth string `yaml:"auth"`
+}
+
+// Expose publishes a raw TCP/UDP port on the node (NodePort).
+type Expose struct {
+	Port     int    `yaml:"port"`     // container port
+	Node     int    `yaml:"node"`     // node port (30000-32767)
+	Protocol string `yaml:"protocol"` // tcp (default) | udp
+}
+
+// Resources uses flat keys: cpu/memory are guaranteed (requests),
+// cpu-max/memory-max are hard caps (limits). Unset means unset.
+type Resources struct {
+	CPU       string `yaml:"cpu"`
+	Memory    string `yaml:"memory"`
+	CPUMax    string `yaml:"cpu-max"`
+	MemoryMax string `yaml:"memory-max"`
+}
+
+type Health struct {
+	Path string `yaml:"path"`
+	Port int    `yaml:"port"`
+}
+
+// GPU accepts either a count (`gpu: 1`) or a mapping
+// (`gpu: {count: 2, devices: "0,2"}`).
+type GPU struct {
+	Count   int    `yaml:"count"`
+	Devices string `yaml:"devices"`
+}
+
+func (g *GPU) UnmarshalYAML(unmarshal func(any) error) error {
+	var n int
+	if err := unmarshal(&n); err == nil {
+		g.Count = n
+		return nil
+	}
+	type raw GPU // avoid recursion
+	var r raw
+	if err := unmarshal(&r); err != nil {
+		return fmt.Errorf("gpu: expected a count or {count, devices}: %w", err)
+	}
+	*g = GPU(r)
+	return nil
+}
+
+func (g GPU) Enabled() bool { return g.Count > 0 || g.Devices != "" }
+
+type Volume struct {
+	Size  string `yaml:"size"`
+	Class string `yaml:"class"`
+}
+
+// MainPort is the service's primary container port (Port, or the first of
+// Ports), 0 when none.
+func (s Service) MainPort() int {
+	if s.Port != 0 {
+		return s.Port
+	}
+	if len(s.Ports) > 0 {
+		return s.Ports[0]
+	}
+	return 0
+}
+
+// AllPorts is the deduplicated union of Port and Ports, in declaration order.
+func (s Service) AllPorts() []int {
+	var out []int
+	seen := map[int]bool{}
+	for _, p := range append([]int{s.Port}, s.Ports...) {
+		if p != 0 && !seen[p] {
+			seen[p] = true
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// IsStateful reports whether the service compiles to a StatefulSet: explicit
+// stateful: true, or implied by mounting volumes.
+func (s Service) IsStateful() bool {
+	if s.Stateful != nil {
+		return *s.Stateful
+	}
+	return len(s.Volumes) > 0
+}
+
+// ReplicaCount defaults to 1.
+func (s Service) ReplicaCount() int {
+	if s.Replicas != nil {
+		return *s.Replicas
+	}
+	return 1
+}

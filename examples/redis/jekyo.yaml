@@ -1,0 +1,13 @@
+app: redis
+services:
+  redis:
+    image: redis:7-alpine
+    args:
+      - --appendonly
+      - "yes"
+    port: 6379
+    volumes:
+      data: /data
+volumes:
+  data:
+    size: 1Gi

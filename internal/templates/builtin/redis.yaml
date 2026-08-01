@@ -1,0 +1,15 @@
+app: redis
+description: Redis 7 with append-only persistence
+icon: https://raw.githubusercontent.com/docker-library/docs/master/redis/logo.png
+services:
+  redis:
+    image: redis:7-alpine
+    args:
+      - --appendonly
+      - "yes"
+    port: 6379
+    volumes:
+      data: /data
+volumes:
+  data:
+    size: 1Gi

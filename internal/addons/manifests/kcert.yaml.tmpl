@@ -1,0 +1,114 @@
+# kcert v1.2.0 — single-pod ACME cert issuer (rendered from its Helm chart,
+# pinned). Issues/renews TLS Secrets for Ingresses labeled
+# kcert.dev/ingress=managed based on their spec.tls entries.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kcert
+  namespace: kube-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kcert
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "create", "update", "patch"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kcert
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: kcert
+subjects:
+  - kind: ServiceAccount
+    name: kcert
+    namespace: kube-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: kcert
+  namespace: kube-system
+rules:
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["get", "list", "create", "delete", "update", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: kcert
+  namespace: kube-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: kcert
+subjects:
+  - kind: ServiceAccount
+    name: kcert
+    namespace: kube-system
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kcert
+  namespace: kube-system
+  labels:
+    app: kcert
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kcert
+  template:
+    metadata:
+      labels:
+        app: kcert
+    spec:
+      serviceAccountName: kcert
+      containers:
+        - name: kcert
+          image: nabsul/kcert:v1.2.0
+          ports:
+            - containerPort: 80
+              name: http
+            - containerPort: 8080
+              name: http-admin
+          env:
+            - name: ACME__DIRURL
+              value: "{{ .AcmeDirURL }}"
+            - name: ACME__TERMSACCEPTED
+              value: "true"
+            - name: ACME__EMAIL
+              value: "{{ .AcmeEmail }}"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kcert
+  namespace: kube-system
+  labels:
+    app: kcert
+spec:
+  selector:
+    app: kcert
+  ports:
+    - name: http
+      protocol: TCP
+      port: 80
+      targetPort: 80
+    - name: http-admin
+      protocol: TCP
+      port: 8080
+      targetPort: 8080

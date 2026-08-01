@@ -1,0 +1,15 @@
+app: postgres
+description: PostgreSQL 16 with pgvector and persistent storage
+icon: https://raw.githubusercontent.com/docker-library/docs/master/postgres/logo.png
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    env:
+      POSTGRES_PASSWORD: ${PG_PASSWORD}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    port: 5432
+    volumes:
+      pgdata: /var/lib/postgresql/data
+volumes:
+  pgdata:
+    size: 10Gi

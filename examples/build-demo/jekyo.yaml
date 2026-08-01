@@ -1,0 +1,13 @@
+app: hello
+services:
+  web:
+    build:
+      context: .
+      inline: |
+        FROM busybox:1.36
+        COPY index.html /www/index.html
+        CMD ["httpd", "-f", "-p", "8080", "-h", "/www"]
+    port: 8080
+    http:
+      domain: hello.test
+      tls: false
