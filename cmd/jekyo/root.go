@@ -36,7 +36,7 @@ Start with:
 		"observe": {newPsCmd(), newLogsCmd(), newExecCmd(), newAttachCmd(), newUICmd(), newTopCmd(), newStatusCmd()},
 		"operate": {newRestartCmd(), newHistoryCmd(), newRollbackCmd(), newBackupCmd()},
 		"servers": {newServerCmd(), newContextCmd(), newVPNCmd(), newRegistryCmd()},
-		"tooling": {newSkillCmd(), newRenderCmd(), newSchemaCmd(), newBuildCmd(), newImagesCmd(), newKubectlCmd(), newVersionCmd()},
+		"tooling": {newSkillCmd(), newRenderCmd(), newSchemaCmd(), newBuildCmd(), newImagesCmd(), newKubectlCmd(), newUpdateCmd(), newVersionCmd()},
 	}
 	for _, g := range []struct{ id, title string }{
 		{"apps", "Apps:"},

@@ -237,7 +237,13 @@ func (m *uiModel) viewHeader() string {
 		return boxWithTitle(identity+" ", "", []string{uiDimStyle.Render("connecting to the cluster...")}, w)
 	}
 	n := m.snap.Nodes[0]
-	right := uiDimStyle.Render(fmt.Sprintf(" %s · %d pods", n.Name, n.PodCount))
+	// the node usually shares the context's name; only show it when it adds
+	// information
+	right := " "
+	if n.Name != m.ctxName {
+		right += uiDimStyle.Render(n.Name + " · ")
+	}
+	right += uiDimStyle.Render(fmt.Sprintf("%d pods", n.PodCount))
 	if m.uptime != "" {
 		right += uiDimStyle.Render(" · up " + m.uptime)
 	}
@@ -311,12 +317,9 @@ func (m *uiModel) viewHeader() string {
 	if m.domain != "" {
 		platRows = append(platRows, uiDimStyle.Render("domain   ")+uiHdrStyle.Render(m.domain))
 	}
-	jver := uiDimStyle.Render("  jekyo ") + version
-	if m.latest != "" && m.latest != "v"+version && version != "dev" {
-		jver += " " + uiAccent.Render("→ "+m.latest)
-	}
 	platRows = append(platRows,
-		uiDimStyle.Render("k8s ")+n.K8sVersion+jver)
+		uiDimStyle.Render("k8s ")+n.K8sVersion+uiDimStyle.Render("  jekyo ")+version)
+
 	bline := uiDimStyle.Render("backups  ")
 	if len(m.snap.Backups) == 0 {
 		bline += uiDimStyle.Render("none configured")
@@ -367,9 +370,35 @@ func (m *uiModel) viewHeader() string {
 		secRows = append(secRows, "")
 		colH++
 	}
+	// brand box: who we are, which version, whether a newer one exists
+	brandW := 24
+	cpuW -= brandW + 1
+	brandRows := make([]string, 0, 6)
+	for _, l := range uiLogo {
+		brandRows = append(brandRows, uiAccent.Bold(true).Render(l))
+	}
+	brandRows = append(brandRows, uiDimStyle.Render("v")+version)
+	if m.latest != "" && m.latest != "v"+version && version != "dev" {
+		brandRows = append(brandRows, uiAccent.Render(m.latest+" available"),
+			uiAccent.Render("run: jekyo update"))
+	}
+	brandRows = append(brandRows, uiDimStyle.Render("Stop doing ops."))
+
 	platCol := boxWithTitle(btopTitle("⁰", "server"), "", platRows, platW) + "\n" +
 		boxWithTitle(btopTitle("⁶", "security"), "", secRows, platW)
+	colTarget := len(cpuRows) + 2
+	if len(brandRows)+2 > colTarget {
+		colTarget = len(brandRows) + 2
+	}
+	for len(cpuRows)+2 < colTarget {
+		cpuRows = append(cpuRows, "")
+	}
+	for len(brandRows)+2 < colTarget {
+		brandRows = append(brandRows, "")
+	}
 	cpuBox := lipgloss.JoinHorizontal(lipgloss.Top,
+		boxWithTitle(uiHdrStyle.Render(" JEKYO "), "", brandRows, brandW),
+		" ",
 		boxWithTitle(btopTitle("¹", "cpu")+uiDimStyle.Render("─· ")+identity+" ", right, cpuRows, cpuW),
 		" ",
 		platCol)

@@ -6,6 +6,21 @@ All notable changes to JEKYO are documented here. The format follows
 may contain breaking changes and patches never do. From 1.0 on, breaking
 changes only land in major versions.
 
+## [0.15.0] - 2026-08-01
+
+### Added
+
+- `jekyo update`: self-update to the latest release in place, atomic
+  replace of the running binary (suggests sudo when the install
+  location needs it).
+- A JEKYO brand box opens the `jekyo ui` header: wordmark, version, an
+  update-available alert pointing at `jekyo update`, and the motto.
+
+### Fixed
+
+- The context name no longer repeats in the cpu box border when the
+  node is named after the context.
+
 ## [0.14.0] - 2026-08-01
 
 ### Added
