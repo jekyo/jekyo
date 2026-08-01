@@ -23,7 +23,7 @@ func TestSparkline(t *testing.T) {
 func TestUIViewSmoke(t *testing.T) {
 	m := &uiModel{
 		ctxName: "test",
-		width:   100, height: 30,
+		width:   150, height: 34,
 		snap: &topSnapshot{
 			Nodes: []topNode{{Name: "n1", CPUPct: 10, MemPct: 20, PodCount: 2}},
 			Pods: []topPod{
@@ -39,7 +39,7 @@ func TestUIViewSmoke(t *testing.T) {
 	if app, svc, ok := m.selected(); !ok || app != "acme" || svc != "api" {
 		t.Fatalf("selection: %s/%s ok=%v", app, svc, ok)
 	}
-	for _, tab := range []int{tabLogs, tabMetrics, tabStatus} {
+	for _, tab := range []int{tabLogs, tabStatus} {
 		m.tab = tab
 		out := m.View()
 		if !strings.Contains(out, "acme") {
@@ -50,9 +50,10 @@ func TestUIViewSmoke(t *testing.T) {
 	if !strings.Contains(m.View(), "hello log") {
 		t.Error("logs tab missing log line")
 	}
-	m.tab = tabMetrics
+	m.graphs = true
+	m.tab = tabLogs
 	if !strings.Contains(m.View(), "peak") {
-		t.Error("metrics tab missing sparkline header")
+		t.Error("metrics strip missing peak stats")
 	}
 	// nav skips app header rows
 	m.move(1)

@@ -76,7 +76,6 @@ type nodeHistPt struct {
 
 const (
 	tabLogs = iota
-	tabMetrics
 	tabStatus
 )
 
@@ -112,6 +111,7 @@ type uiModel struct {
 	prevSnap *topSnapshot
 	events   map[string][]string
 
+	graphs   bool
 	load     string
 	uptime   string
 	cores    []float64
@@ -580,7 +580,7 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "l", "1":
 			m.tab = tabLogs
 		case "m", "2":
-			m.tab = tabMetrics
+			m.graphs = !m.graphs
 		case "s", "3":
 			m.tab = tabStatus
 			if app, _, ok := m.selected(); ok {
@@ -664,6 +664,7 @@ func runUI(d *deploy.Deployer, ctxName string, nerd bool) error {
 	}
 	m := &uiModel{
 		d: d, ctxName: ctxName, sshc: sshc,
+		graphs: true,
 		nerd:   nerd || os.Getenv("JEKYO_NERD") != "",
 		snap:   &topSnapshot{},
 		logs:   map[string][]string{},

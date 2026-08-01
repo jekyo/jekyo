@@ -6,6 +6,18 @@ All notable changes to JEKYO are documented here. The format follows
 may contain breaking changes and patches never do. From 1.0 on, breaking
 changes only land in major versions.
 
+## [0.10.0] - 2026-08-01
+
+### Changed
+
+- `jekyo ui` layout: service metrics are always visible now. A btop
+  strip (cpu, mem, traffic with braille history and now/peak) sits
+  above the logs pane for whatever is selected; `m` toggles it, `s`
+  swaps logs for status. The metrics tab is gone because it no longer
+  needs to exist.
+- Contrast pass: labels brightened, selection is amber on dark like
+  the JEKYO palette, values in near-white.
+
 ## [0.9.0] - 2026-08-01
 
 ### Changed

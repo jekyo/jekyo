@@ -20,8 +20,10 @@ var (
 	uiRed    = lipgloss.NewStyle().Foreground(uiBad)
 
 	uiHdrStyle = lipgloss.NewStyle().Foreground(uiAmber).Bold(true)
-	uiDimStyle = lipgloss.NewStyle().Foreground(uiDim)
-	uiSelStyle = lipgloss.NewStyle().Background(lipgloss.Color("238")).Foreground(lipgloss.Color("230")).Bold(true)
+	// labels must stay readable on dark terminals; 240 was too faint
+	uiDimStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("246"))
+	uiBorder   = lipgloss.NewStyle().Foreground(uiDim)
+	uiSelStyle = lipgloss.NewStyle().Background(uiAmber).Foreground(lipgloss.Color("233")).Bold(true)
 
 	uiPane = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(uiDim).Padding(0, 1)
 
@@ -356,7 +358,7 @@ func boxWithTitle(title, right string, rows []string, w int) string {
 	if rest < 0 {
 		rest = 0
 	}
-	bs := uiDimStyle
+	bs := uiBorder
 	var b strings.Builder
 	b.WriteString(bs.Render("╭─") + title + bs.Render(strings.Repeat("─", rest)) + right + bs.Render("─╮") + "\n")
 	for _, r := range rows {
@@ -429,32 +431,28 @@ func (m *uiModel) viewRight(w, h int) string {
 	app, svc, ok := m.selected()
 	key := app + "/" + svc
 
-	tabs := []struct {
-		icon, label, key string
-		id               int
-	}{
-		{m.ic("logs"), "logs", "l", tabLogs},
-		{m.ic("chart"), "metrics", "m", tabMetrics},
-		{m.ic("info"), "status", "s", tabStatus},
+	strip := ""
+	stripH := 0
+	if m.graphs && ok && h > 14 {
+		strip = m.viewMetricStrip(key, w)
+		stripH = lipgloss.Height(strip)
 	}
-	var tb []string
-	for _, t := range tabs {
-		_ = t.key
-		if t.id == m.tab {
-			tb = append(tb, uiTabOn.Render(t.icon+" "+t.label))
-		} else {
-			tb = append(tb, uiTabOff.Render(t.icon+" "+t.label))
-		}
+
+	label := m.ic("logs") + " logs"
+	if m.tab == tabStatus {
+		label = m.ic("info") + " status"
 	}
-	title := lipgloss.JoinHorizontal(lipgloss.Bottom, tb...)
+	title := uiTabOn.Render(label)
 	if ok {
 		title = lipgloss.JoinHorizontal(lipgloss.Center, title, uiDimStyle.Render("  ·  "), uiHdrStyle.Render(key))
 	}
 
-	avail := h - 3 // tab bar takes two rows
+	avail := h - stripH - 3
 	content := ""
 	switch m.tab {
-	case tabLogs:
+	case tabStatus:
+		content = m.viewStatus(app, w)
+	default:
 		lines := m.logs[key]
 		if len(lines) > avail {
 			lines = lines[len(lines)-avail:]
@@ -468,12 +466,62 @@ func (m *uiModel) viewRight(w, h int) string {
 			}
 			content = b.String()
 		}
-	case tabMetrics:
-		content = m.viewMetrics(key, w-2)
-	case tabStatus:
-		content = m.viewStatus(app, w)
+	}
+	if strip != "" {
+		return strip + "\n" + title + "\n" + content
 	}
 	return title + "\n" + content
+}
+
+// viewMetricStrip is the always-visible btop row for the selected
+// service: cpu, mem, and traffic boxes with braille history.
+func (m *uiModel) viewMetricStrip(key string, w int) string {
+	h := m.hist[key]
+	boxW := (w - 2) / 3
+	if len(h) == 0 {
+		return boxWithTitle(btopTitle("∿", " collecting"), "", []string{uiDimStyle.Render("sampling " + key + "...")}, w-2)
+	}
+	cpus := make([]int64, len(h))
+	mems := make([]int64, len(h))
+	rxs := make([]int64, len(h))
+	txs := make([]int64, len(h))
+	var maxC, maxM int64
+	for i, pt := range h {
+		cpus[i], mems[i] = pt.cpu, pt.mem
+		rxs[i], txs[i] = int64(pt.rx), int64(pt.tx)
+		if pt.cpu > maxC {
+			maxC = pt.cpu
+		}
+		if pt.mem > maxM {
+			maxM = pt.mem
+		}
+	}
+	cur := h[len(h)-1]
+	gw := boxW - 4
+	stat := func(nowV, peakV string) string {
+		if boxW >= 26 {
+			return fmt.Sprintf("%s %-8s %s %-8s", uiDimStyle.Render("now"), nowV, uiDimStyle.Render("peak"), peakV)
+		}
+		return uiDimStyle.Render("now ") + nowV
+	}
+	cpuRows := []string{
+		uiAccent.Render(braille(cpus, gw)),
+		stat(fmtCPU(cur.cpu), fmtCPU(maxC)),
+	}
+	memRows := []string{
+		uiGreen.Render(braille(mems, gw)),
+		stat(fmtMem(cur.mem), fmtMem(maxM)),
+	}
+	netRows := []string{
+		uiAccent.Render(braille(rxs, gw)),
+		fmt.Sprintf("%s %-9s %s %-9s", uiAccent.Render("▼"), fmtRate(cur.rx), uiGreen.Render("▲"), fmtRate(cur.tx)),
+	}
+	_ = txs
+	return lipgloss.JoinHorizontal(lipgloss.Top,
+		boxWithTitle(btopTitle("", m.ic("cpu")+" cpu"), "", cpuRows, boxW),
+		boxWithTitle(btopTitle("", m.ic("mem")+" mem"), "", memRows, boxW),
+		boxWithTitle(btopTitle("", m.ic("net")+" net"), "", netRows, w-2-2*boxW),
+	)
 }
 
 func (m *uiModel) viewStatus(app string, w int) string {
@@ -513,58 +561,13 @@ func (m *uiModel) viewStatus(app string, w int) string {
 	return b.String()
 }
 
-func (m *uiModel) viewMetrics(key string, w int) string {
-	h := m.hist[key]
-	if len(h) == 0 {
-		return uiDimStyle.Render("collecting samples...")
-	}
-	cpus := make([]int64, len(h))
-	mems := make([]int64, len(h))
-	rxs := make([]int64, len(h))
-	txs := make([]int64, len(h))
-	var maxC, maxM int64
-	var maxRx, maxTx float64
-	for i, pt := range h {
-		cpus[i], mems[i] = pt.cpu, pt.mem
-		rxs[i], txs[i] = int64(pt.rx), int64(pt.tx)
-		if pt.cpu > maxC {
-			maxC = pt.cpu
-		}
-		if pt.mem > maxM {
-			maxM = pt.mem
-		}
-		if pt.rx > maxRx {
-			maxRx = pt.rx
-		}
-		if pt.tx > maxTx {
-			maxTx = pt.tx
-		}
-	}
-	cur := h[len(h)-1]
-	sw := w - 2
-	if sw > 100 {
-		sw = 100
-	}
-	var b strings.Builder
-	fmt.Fprintf(&b, "%s cpu   now %-8s peak %-8s %s\n", m.ic("cpu"), fmtCPU(cur.cpu), fmtCPU(maxC),
-		uiDimStyle.Render(fmt.Sprintf("window %ds", len(h)*2)))
-	b.WriteString(uiAccent.Render(sparkline(cpus, sw)) + "\n\n")
-	fmt.Fprintf(&b, "%s mem   now %-8s peak %-8s\n", m.ic("mem"), fmtMem(cur.mem), fmtMem(maxM))
-	b.WriteString(uiGreen.Render(sparkline(mems, sw)) + "\n\n")
-	fmt.Fprintf(&b, "%s net ↓ now %-9s peak %-9s\n", m.ic("net"), fmtRate(cur.rx), fmtRate(maxRx))
-	b.WriteString(uiAccent.Render(sparkline(rxs, sw)) + "\n")
-	fmt.Fprintf(&b, "%s net ↑ now %-9s peak %-9s\n", m.ic("net"), fmtRate(cur.tx), fmtRate(maxTx))
-	b.WriteString(uiGreen.Render(sparkline(txs, sw)) + "\n")
-	return b.String()
-}
-
 func (m *uiModel) viewFooter() string {
 	if m.confirm != nil {
 		return lipgloss.NewStyle().Background(uiAmber).Foreground(lipgloss.Color("232")).Bold(true).
 			Padding(0, 1).Render(m.confirm.prompt)
 	}
 	keys := []struct{ k, label string }{
-		{"j/k", "move"}, {"l", "logs"}, {"m", "metrics"}, {"s", "status"},
+		{"j/k", "move"}, {"l", "logs"}, {"s", "status"}, {"m", "graphs on/off"},
 		{"r", "restart"}, {"b", "rollback"}, {"e", "exec"}, {"a", "attach"}, {"q", "quit"},
 	}
 	parts := make([]string, len(keys))
