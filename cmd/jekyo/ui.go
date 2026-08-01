@@ -3,7 +3,9 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"sort"
@@ -72,6 +74,7 @@ type eventsMsg struct {
 	lines []string
 }
 type actionMsg struct{ text string }
+type latestMsg struct{ tag string }
 
 // uiRow is one line of the left pane tree.
 type uiRow struct {
@@ -131,6 +134,7 @@ type uiModel struct {
 	events   map[string][]string
 
 	graphs   bool
+	latest   string
 	load     string
 	uptime   string
 	cores    []float64
@@ -468,7 +472,24 @@ func (m *uiModel) perCore(stat string) []float64 {
 // ---- model ----
 
 func (m *uiModel) Init() tea.Cmd {
-	return tea.Batch(m.gatherCmd(), uiTick())
+	return tea.Batch(m.gatherCmd(), uiTick(), fetchLatest)
+}
+
+// fetchLatest asks GitHub once for the newest release tag; best-effort.
+func fetchLatest() tea.Msg {
+	client := &http.Client{Timeout: 3 * time.Second}
+	resp, err := client.Get("https://api.github.com/repos/jekyo/jekyo/releases/latest")
+	if err != nil {
+		return latestMsg{}
+	}
+	defer resp.Body.Close()
+	var v struct {
+		Tag string `json:"tag_name"`
+	}
+	if json.NewDecoder(resp.Body).Decode(&v) != nil {
+		return latestMsg{}
+	}
+	return latestMsg{tag: v.Tag}
 }
 
 func (m *uiModel) selected() (app, svc string, ok bool) {
@@ -655,6 +676,10 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case eventsMsg:
 		m.events[msg.app] = msg.lines
+		return m, nil
+
+	case latestMsg:
+		m.latest = msg.tag
 		return m, nil
 
 	case actionMsg:

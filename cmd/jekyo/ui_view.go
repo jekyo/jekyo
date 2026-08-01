@@ -311,8 +311,30 @@ func (m *uiModel) viewHeader() string {
 	if m.domain != "" {
 		platRows = append(platRows, uiDimStyle.Render("domain   ")+uiHdrStyle.Render(m.domain))
 	}
+	jver := uiDimStyle.Render("  jekyo ") + version
+	if m.latest != "" && m.latest != "v"+version && version != "dev" {
+		jver += " " + uiAccent.Render("→ "+m.latest)
+	}
 	platRows = append(platRows,
-		uiDimStyle.Render("k8s ")+n.K8sVersion+uiDimStyle.Render("  jekyo ")+version)
+		uiDimStyle.Render("k8s ")+n.K8sVersion+jver)
+	bline := uiDimStyle.Render("backups  ")
+	if len(m.snap.Backups) == 0 {
+		bline += uiDimStyle.Render("none configured")
+	} else {
+		overdue := 0
+		for _, b := range m.snap.Backups {
+			if b.Overdue {
+				overdue++
+			}
+		}
+		if overdue > 0 {
+			bline += uiRed.Render(fmt.Sprintf("%s %d of %d overdue", m.ic("warn"), overdue, len(m.snap.Backups)))
+		} else {
+			bline += uiGreen.Render(fmt.Sprintf("%s %d volumes fresh", m.ic("ok"), len(m.snap.Backups)))
+		}
+	}
+	platRows = append(platRows, bline)
+
 	upd := uiDimStyle.Render("updates  ")
 	switch {
 	case m.updSec > 0:
@@ -322,7 +344,7 @@ func (m *uiModel) viewHeader() string {
 	default:
 		upd += uiGreen.Render("up to date")
 	}
-	platRows = append(platRows, upd)
+	secRows := []string{upd}
 	var alerts []string
 	if m.reboot {
 		alerts = append(alerts, uiRed.Render(m.ic("warn")+" reboot required"))
@@ -333,18 +355,24 @@ func (m *uiModel) viewHeader() string {
 		alerts = append(alerts, uiDimStyle.Render("ssh fails ")+fmt.Sprintf("%d", m.sshFails))
 	}
 	if len(alerts) > 0 {
-		platRows = append(platRows, strings.Join(alerts, uiDimStyle.Render(" · ")))
+		secRows = append(secRows, strings.Join(alerts, uiDimStyle.Render(" · ")))
 	}
-	for len(platRows)+2 < len(cpuRows)+2 {
-		platRows = append(platRows, "")
-	}
-	for len(cpuRows)+2 < len(platRows)+2 {
+
+	// the server column stacks two boxes; keep it flush with the cpu box
+	colH := len(platRows) + 2 + len(secRows) + 2
+	for len(cpuRows)+2 < colH {
 		cpuRows = append(cpuRows, "")
 	}
+	for colH < len(cpuRows)+2 {
+		secRows = append(secRows, "")
+		colH++
+	}
+	platCol := boxWithTitle(btopTitle("⁰", "server"), "", platRows, platW) + "\n" +
+		boxWithTitle(btopTitle("⁶", "security"), "", secRows, platW)
 	cpuBox := lipgloss.JoinHorizontal(lipgloss.Top,
 		boxWithTitle(btopTitle("¹", "cpu")+uiDimStyle.Render("─· ")+identity+" ", right, cpuRows, cpuW),
 		" ",
-		boxWithTitle(btopTitle("⁰", "server"), "", platRows, platW))
+		platCol)
 
 	// bottom row: mem, disks, net side by side
 	memW := (w - 2) * 30 / 100

@@ -50,6 +50,34 @@ type topPod struct {
 	NetTxBytes int64 `json:"networkTxBytes,omitempty"`
 }
 
+type topBackup struct {
+	App         string `json:"app"`
+	Volume      string `json:"volume"`
+	Schedule    string `json:"schedule"`
+	LastAgeSec  int64  `json:"lastSuccessAgeSeconds"` // -1 = never
+	Overdue     bool   `json:"overdue"`
+}
+
+// cronInterval estimates a cron schedule's period for freshness checks.
+func cronInterval(spec string) time.Duration {
+	f := strings.Fields(spec)
+	if len(f) == 5 {
+		var n int
+		if _, err := fmt.Sscanf(f[0], "*/%d", &n); err == nil && f[1] == "*" {
+			return time.Duration(n) * time.Minute
+		}
+		if _, err := fmt.Sscanf(f[1], "*/%d", &n); err == nil {
+			return time.Duration(n) * time.Hour
+		}
+		if f[1] != "*" && f[2] == "*" && f[4] == "*" && f[3] == "*" {
+			if f[4] == "*" {
+				return 24 * time.Hour
+			}
+		}
+	}
+	return 24 * time.Hour
+}
+
 type topVolume struct {
 	App      string  `json:"app"`
 	Claim    string  `json:"claim"`
@@ -83,6 +111,7 @@ type topSnapshot struct {
 	CertDays int   `json:"nearestCertExpiryDays"` // -1 when no certs found
 	Services int   `json:"services"`
 	Domains  int   `json:"domains"`
+	Backups  []topBackup `json:"backups,omitempty"`
 	Nodes   []topNode   `json:"nodes"`
 	Pods    []topPod    `json:"pods"`
 	Volumes []topVolume `json:"volumes,omitempty"`
@@ -210,6 +239,26 @@ func gatherTop(ctx context.Context, d *deploy.Deployer, contextName, app string)
 		}
 	}
 	snap.Domains = len(hosts)
+
+	if cjs, err := d.Client.Typed.BatchV1().CronJobs("").List(ctx, metav1.ListOptions{LabelSelector: "jekyo.io/backup=true"}); err == nil {
+		for _, cj := range cjs.Items {
+			b := topBackup{
+				App:      strings.TrimPrefix(cj.Namespace, "jekyo-"),
+				Volume:   cj.Labels["jekyo.io/volume"],
+				Schedule: cj.Spec.Schedule,
+				LastAgeSec: -1,
+			}
+			iv := cronInterval(cj.Spec.Schedule)
+			if cj.Status.LastSuccessfulTime != nil {
+				age := time.Since(cj.Status.LastSuccessfulTime.Time)
+				b.LastAgeSec = int64(age.Seconds())
+				b.Overdue = age > 2*iv
+			} else {
+				b.Overdue = time.Since(cj.CreationTimestamp.Time) > 2*iv
+			}
+			snap.Backups = append(snap.Backups, b)
+		}
+	}
 
 	// nearest TLS certificate expiry across the cluster
 	if secs, err := d.Client.Typed.CoreV1().Secrets("").List(ctx, metav1.ListOptions{FieldSelector: "type=kubernetes.io/tls"}); err == nil {

@@ -25,6 +25,7 @@ func newServerCmd() *cobra.Command {
 		newServerInstallCmd(),
 		newServerUninstallCmd(),
 		newServerInfoCmd(),
+		newServerHardenCmd(),
 	)
 	return cmd
 }
@@ -316,4 +317,63 @@ func confirm(cmd *cobra.Command, question string) bool {
 		return false
 	}
 	return strings.EqualFold(strings.TrimSpace(confirmScanner.Text()), "y")
+}
+
+// newServerHardenCmd installs the two boring guards every internet-facing
+// box should run: fail2ban (bans brute-force SSH sources) and
+// unattended-upgrades (applies security updates automatically).
+func newServerHardenCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "harden [user@host]",
+		Short: "Enable fail2ban and automatic security updates on the server",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			target := ""
+			if len(args) == 1 {
+				target = args[0]
+			} else {
+				store, err := contexts.Open()
+				if err != nil {
+					return err
+				}
+				m, err := store.Resolve(contextFlag)
+				if err != nil {
+					return err
+				}
+				target = m.SSH
+			}
+			ssh, err := dial(target)
+			if err != nil {
+				return err
+			}
+			defer ssh.Close()
+
+			step := func(name, remote string) error {
+				fmt.Fprintf(cmd.OutOrStdout(), "→ %s ... ", name)
+				if _, err := ssh.Run(remote); err != nil {
+					fmt.Fprintln(cmd.OutOrStdout(), "FAILED")
+					return fmt.Errorf("%s: %w", name, err)
+				}
+				fmt.Fprintln(cmd.OutOrStdout(), "done")
+				return nil
+			}
+			if err := step("installing fail2ban and unattended-upgrades",
+				"DEBIAN_FRONTEND=noninteractive apt-get update -q && DEBIAN_FRONTEND=noninteractive apt-get install -y -q fail2ban unattended-upgrades"); err != nil {
+				return err
+			}
+			if err := step("configuring the sshd jail",
+				`printf '[sshd]\nenabled = true\nmaxretry = 5\nbantime = 1h\nfindtime = 10m\n' > /etc/fail2ban/jail.d/jekyo-sshd.local && systemctl enable --now fail2ban && systemctl restart fail2ban`); err != nil {
+				return err
+			}
+			if err := step("enabling automatic security updates",
+				`printf 'APT::Periodic::Update-Package-Lists "1";\nAPT::Periodic::Unattended-Upgrade "1";\n' > /etc/apt/apt.conf.d/20auto-upgrades && systemctl enable --now unattended-upgrades`); err != nil {
+				return err
+			}
+			out, _ := ssh.Run("fail2ban-client status sshd 2>/dev/null | tail -3")
+			cmd.Println("\nHardened. fail2ban sshd jail:")
+			cmd.Println(out)
+			cmd.Println("Security updates now apply automatically; reboots for kernel updates stay manual (the ui shows when one is needed).")
+			return nil
+		},
+	}
 }

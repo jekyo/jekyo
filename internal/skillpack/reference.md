@@ -146,6 +146,7 @@ jekyo backup config|now|ls|restore
 jekyo registry login <host>
 jekyo images | build [-f file]
 jekyo vpn peers | add-peer | rm-peer | config
+jekyo server harden            # fail2ban + automatic security updates on the server
 jekyo context ls | use | show | export | import
 jekyo schema                   # JSON Schema for validation
 ```

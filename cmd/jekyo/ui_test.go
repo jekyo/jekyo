@@ -23,7 +23,7 @@ func TestSparkline(t *testing.T) {
 func TestUIViewSmoke(t *testing.T) {
 	m := &uiModel{
 		ctxName: "test",
-		width:   150, height: 34,
+		width:   150, height: 46,
 		snap: &topSnapshot{
 			Nodes: []topNode{{Name: "n1", CPUPct: 10, MemPct: 20, PodCount: 2}},
 			Pods: []topPod{

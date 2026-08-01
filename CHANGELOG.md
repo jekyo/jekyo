@@ -6,6 +6,24 @@ All notable changes to JEKYO are documented here. The format follows
 may contain breaking changes and patches never do. From 1.0 on, breaking
 changes only land in major versions.
 
+## [0.14.0] - 2026-08-01
+
+### Added
+
+- `jekyo server harden`: installs and configures fail2ban (sshd jail,
+  1h bans) and unattended security updates on the server. One command,
+  idempotent.
+- Backup freshness: the `jekyo ui` server box reports whether every
+  volume with a `backup:` schedule has a recent successful snapshot,
+  red when overdue; `jekyo top --json` gains a `backups` array with
+  per-volume age and overdue flags.
+- Update awareness: the ui shows when a newer JEKYO release exists.
+
+### Changed
+
+- The security signals moved into their own bordered box under the
+  server box.
+
 ## [0.13.0] - 2026-08-01
 
 ### Added
