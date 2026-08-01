@@ -137,7 +137,7 @@ func newServerInstallCmd() *cobra.Command {
 				results = provision.Preflight(facts, cfg)
 			}
 			if provision.Blocking(results) {
-				return fmt.Errorf("preflight failed — fix the FAIL items above and re-run")
+				return fmt.Errorf("preflight failed: fix the FAIL items above and re-run")
 			}
 
 			// Reuse credentials on converge so re-installs don't rotate secrets.

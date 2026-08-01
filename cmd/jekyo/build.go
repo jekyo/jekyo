@@ -26,7 +26,7 @@ import (
 // then pushed into the registry from the server side.
 func buildEnv(m contexts.Meta) (build.Env, func(), error) {
 	if m.Registry == nil {
-		return build.Env{}, nil, fmt.Errorf("context %q has no registry — re-run 'jekyo server install'", m.Name)
+		return build.Env{}, nil, fmt.Errorf("context %q has no registry; re-run 'jekyo server install'", m.Name)
 	}
 	ssh, err := dial(m.SSH)
 	if err != nil {

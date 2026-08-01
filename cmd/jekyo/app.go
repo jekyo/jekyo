@@ -115,6 +115,10 @@ func newUpCmd() *cobra.Command {
 			}
 			ctx, cancel := context.WithTimeout(cmd.Context(), deployTimeout)
 			defer cancel()
+			rev, err := d.Apply(ctx, app.Name, objs)
+			if err != nil {
+				return err
+			}
 			for _, v := range app.Volumes {
 				if v.Backup != nil {
 					if err := d.EnsureBackupSecret(ctx, app.Name); err != nil {
@@ -122,10 +126,6 @@ func newUpCmd() *cobra.Command {
 					}
 					break
 				}
-			}
-			rev, err := d.Apply(ctx, app.Name, objs)
-			if err != nil {
-				return err
 			}
 			cmd.Printf("App %s deployed (revision %d, %d services)\n", app.Name, rev, len(app.Services))
 			for _, name := range sortedServiceNames(app) {
@@ -180,7 +180,7 @@ func newDownCmd() *cobra.Command {
 			if withVolumes {
 				cmd.Println("App removed, volumes deleted:", name)
 			} else {
-				cmd.Println("App removed (volumes kept — 'jekyo down", name, "--volumes' to delete them)")
+				cmd.Println("App removed (volumes kept; 'jekyo down", name, "--volumes' deletes them)")
 			}
 			return nil
 		},

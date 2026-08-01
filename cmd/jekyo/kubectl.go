@@ -33,12 +33,12 @@ func newKubectlCmd() *cobra.Command {
 			}
 			kubeconfig := store.KubeconfigPath(m.Name)
 			if _, err := os.Stat(kubeconfig); err != nil {
-				return fmt.Errorf("context %q has no kubeconfig — re-run 'jekyo server install' to repair", m.Name)
+				return fmt.Errorf("context %q has no kubeconfig; re-run 'jekyo server install' to repair", m.Name)
 			}
 
 			path, err := exec.LookPath("kubectl")
 			if err != nil {
-				return fmt.Errorf("kubectl not found in PATH — install it or use the jekyo commands directly")
+				return fmt.Errorf("kubectl not found in PATH; install it or use the jekyo commands directly")
 			}
 			c := exec.Command(path, args...)
 			c.Stdin, c.Stdout, c.Stderr = os.Stdin, os.Stdout, os.Stderr

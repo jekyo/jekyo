@@ -43,7 +43,7 @@ in every Claude Code session, and Codex picks it up from ~/.codex/AGENTS.md.`,
 				} else {
 					agents = skillpack.Detect(dir)
 					if len(agents) == 0 {
-						return fmt.Errorf("no agent config detected in %s (looked for .claude/, AGENTS.md, .cursor/) — pass --agent all|claude|codex|cursor, or --global for a user-level install", dir)
+						return fmt.Errorf("no agent config detected in %s (looked for .claude/, AGENTS.md, .cursor/); pass --agent all|claude|codex|cursor, or --global for a user-level install", dir)
 					}
 				}
 			case "all":
@@ -59,7 +59,7 @@ in every Claude Code session, and Codex picks it up from ~/.codex/AGENTS.md.`,
 				cmd.Println("wrote", f)
 			}
 			if global {
-				cmd.Println("Installed globally — try '/jekyo deploy this app' in any Claude Code session.")
+				cmd.Println("Installed globally. Try '/jekyo deploy this app' in any Claude Code session.")
 			}
 			cmd.Println("Re-run after upgrading jekyo to refresh the packs.")
 			return nil
@@ -141,9 +141,9 @@ func newTemplatesCmd() *cobra.Command {
 				enc.SetIndent("", "  ")
 				return enc.Encode(view)
 			}
-			cmd.Printf("%s — %s\n", args[0], meta.Description)
+			cmd.Printf("%s: %s\n", args[0], meta.Description)
 			if len(meta.Inputs) == 0 {
-				cmd.Println("No inputs — 'jekyo init " + args[0] + "' works as-is.")
+				cmd.Println("No inputs. 'jekyo init " + args[0] + "' works as-is.")
 				return nil
 			}
 			cmd.Println("\nInputs:")
@@ -199,7 +199,7 @@ inputs fail with a list. Discover inputs first: jekyo templates inspect <name>.`
 				if err := os.WriteFile("jekyo.yaml", data, 0o644); err != nil {
 					return err
 				}
-				cmd.Println("Wrote jekyo.yaml — edit it, then run: jekyo up")
+				cmd.Println("Wrote jekyo.yaml. Edit it, then run: jekyo up")
 				return nil
 			}
 
@@ -282,7 +282,7 @@ inputs fail with a list. Discover inputs first: jekyo templates inspect <name>.`
 					return err
 				}
 				appendGitignore(".env")
-				cmd.Println("Wrote .env with generated secrets (gitignored) — deploy with: jekyo up --env-file .env")
+				cmd.Println("Wrote .env with generated secrets (gitignored). Deploy with: jekyo up --env-file .env")
 			} else {
 				cmd.Println("Deploy with: jekyo up")
 			}

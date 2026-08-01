@@ -12,7 +12,7 @@ var contextFlag string
 func newRootCmd() *cobra.Command {
 	root := &cobra.Command{
 		Use:   "jekyo",
-		Short: "JEKYO — a personal PaaS on k3s",
+		Short: "JEKYO, a personal PaaS on k3s",
 		Long: `JEKYO turns a bare Ubuntu server into a batteries-included k3s cluster
 and deploys apps described by a single jekyo.yaml.
 
