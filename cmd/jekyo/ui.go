@@ -32,6 +32,13 @@ type snapMsg struct {
 	mounts []mountRow // real filesystems with usage
 	tempC  int        // package temperature, 0 = unknown
 	mem    memInfo
+	gpu    gpuInfo
+}
+
+type gpuInfo struct {
+	present                    bool
+	probed                     bool
+	util, memUsed, memTot, temp int
 }
 
 type memInfo struct {
@@ -118,6 +125,7 @@ type uiModel struct {
 	mounts   []mountRow
 	tempC    int
 	mem      memInfo
+	gpu      gpuInfo
 	prevStat map[int][2]uint64 // per-core total/idle counters
 
 	confirm *confirmState
@@ -140,7 +148,8 @@ func (m *uiModel) gatherCmd() tea.Cmd {
 			out, err := m.sshc.Run(
 				"cat /proc/loadavg /proc/uptime 2>/dev/null; echo @@@; cat /proc/stat; echo @@@; cat /proc/meminfo; echo @@@; " +
 					"df -B1 -x tmpfs -x devtmpfs -x overlay --output=target,size,used 2>/dev/null | tail -n +2; echo @@@; " +
-					"cat /sys/class/hwmon/hwmon*/temp1_input 2>/dev/null | sort -rn | head -1")
+					"cat /sys/class/hwmon/hwmon*/temp1_input 2>/dev/null | sort -rn | head -1; echo @@@; " +
+					"nvidia-smi --query-gpu=utilization.gpu,memory.used,memory.total,temperature.gpu --format=csv,noheader,nounits 2>/dev/null || echo none")
 			if err == nil {
 				parts := strings.Split(out, "@@@")
 				if len(parts) > 0 {
@@ -206,6 +215,20 @@ func (m *uiModel) gatherCmd() tea.Cmd {
 					fmt.Sscanf(strings.TrimSpace(parts[4]), "%d", &milli)
 					if milli > 1000 {
 						msg.tempC = milli / 1000
+					}
+				}
+				if len(parts) > 5 {
+					g := strings.TrimSpace(parts[5])
+					msg.gpu.probed = true
+					if g != "" && g != "none" {
+						f := strings.Split(strings.Split(g, "\n")[0], ",")
+						if len(f) >= 4 {
+							msg.gpu.present = true
+							fmt.Sscanf(strings.TrimSpace(f[0]), "%d", &msg.gpu.util)
+							fmt.Sscanf(strings.TrimSpace(f[1]), "%d", &msg.gpu.memUsed)
+							fmt.Sscanf(strings.TrimSpace(f[2]), "%d", &msg.gpu.memTot)
+							fmt.Sscanf(strings.TrimSpace(f[3]), "%d", &msg.gpu.temp)
+						}
 					}
 				}
 			}
@@ -515,6 +538,9 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if msg.mem.total > 0 {
 			m.mem = msg.mem
+		}
+		if msg.gpu.probed {
+			m.gpu = msg.gpu
 		}
 		m.err = ""
 		m.rebuildRows()

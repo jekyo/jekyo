@@ -120,6 +120,19 @@ func (m *uiModel) splash() string {
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, caption)
 }
 
+// barCalm renders a meter without alarm thresholds, for metrics where a
+// high value is healthy (Available, Free, Cached).
+func barCalm(pctV float64, width int) string {
+	if pctV < 0 {
+		pctV = 0
+	}
+	if pctV > 100 {
+		pctV = 100
+	}
+	filled := int(pctV/100*float64(width) + 0.5)
+	return "\033[38;5;108m" + strings.Repeat("█", filled) + "\033[2m" + strings.Repeat("░", width-filled) + "\033[0m"
+}
+
 var sparkBlocks = []rune("▁▂▃▄▅▆▇█")
 
 // brailleGrid is btop's graph texture: cell = left sample x right sample,
@@ -286,17 +299,21 @@ func (m *uiModel) viewHeader() string {
 	dskW := w - memW - netW
 	var memRows []string
 	if m.mem.total > 0 {
-		mr := func(label string, v int64) string {
+		mr := func(label string, v int64, calm bool) string {
 			pv := pct(v, m.mem.total)
+			meter := bar(pv, memW-30)
+			if calm {
+				meter = barCalm(pv, memW-30)
+			}
 			return fmt.Sprintf("%s %8s %s %3.0f%%",
-				uiDimStyle.Render(fmt.Sprintf("%-10s", label+":")), fmtMem(v), bar(pv, memW-30), pv)
+				uiDimStyle.Render(fmt.Sprintf("%-10s", label+":")), fmtMem(v), meter, pv)
 		}
 		memRows = []string{
 			uiDimStyle.Render(fmt.Sprintf("%-10s", "Total:")) + fmt.Sprintf(" %8s ", fmtMem(m.mem.total)) + uiGreen.Render(braille(mems, memW-24)),
-			mr("Used", m.mem.used),
-			mr("Available", m.mem.avail),
-			mr("Cached", m.mem.cached),
-			mr("Free", m.mem.free),
+			mr("Used", m.mem.used, false),
+			mr("Available", m.mem.avail, true),
+			mr("Cached", m.mem.cached, true),
+			mr("Free", m.mem.free, true),
 		}
 	} else {
 		memRows = []string{
@@ -320,27 +337,43 @@ func (m *uiModel) viewHeader() string {
 		fmt.Sprintf("%s %-9s %s", uiAccent.Render("▼"), fmtRate(curRx), uiAccent.Render(braille(rxs, netW-30))+uiDimStyle.Render(" Total: ")+fmtMem(n.NetRxBytes)),
 		fmt.Sprintf("%s %-9s %s", uiGreen.Render("▲"), fmtRate(curTx), uiGreen.Render(braille(txs, netW-30))+uiDimStyle.Render(" Total: ")+fmtMem(n.NetTxBytes)),
 	}
-	// equal heights so the boxes align
-	rows := len(memRows)
-	if len(dskRows) > rows {
-		rows = len(dskRows)
+	// gpu shares the net column; both are short
+	var gpuRows []string
+	if m.gpu.present {
+		gp := float64(m.gpu.util)
+		gpuRows = []string{fmt.Sprintf("%s %3.0f%%  %s  %s",
+			bar(gp, netW-32), gp,
+			uiDimStyle.Render(fmt.Sprintf("%dMi/%dMi", m.gpu.memUsed, m.gpu.memTot)),
+			uiDimStyle.Render(fmt.Sprintf("%d°C", m.gpu.temp)))}
+	} else {
+		gpuRows = []string{uiDimStyle.Render("no GPU available")}
 	}
-	if len(netRows) > rows {
-		rows = len(netRows)
+
+	// flush bottom edge: pad the shorter columns
+	memH := len(memRows) + 2
+	dskH := len(dskRows) + 2
+	netColH := len(netRows) + 2 + len(gpuRows) + 2
+	target := memH
+	if dskH > target {
+		target = dskH
 	}
-	for len(memRows) < rows {
+	if netColH > target {
+		target = netColH
+	}
+	for len(memRows)+2 < target {
 		memRows = append(memRows, "")
 	}
-	for len(dskRows) < rows {
+	for len(dskRows)+2 < target {
 		dskRows = append(dskRows, "")
 	}
-	for len(netRows) < rows {
-		netRows = append(netRows, "")
+	for len(netRows)+2+len(gpuRows)+2 < target {
+		gpuRows = append(gpuRows, "")
 	}
 	memBox := boxWithTitle(btopTitle("²", "mem"), "", memRows, memW)
 	dskBox := boxWithTitle(btopTitle("³", "disks"), "", dskRows, dskW)
-	netBox := boxWithTitle(btopTitle("⁴", "net"), "", netRows, netW)
-	return cpuBox + "\n" + lipgloss.JoinHorizontal(lipgloss.Top, memBox, dskBox, netBox)
+	netCol := boxWithTitle(btopTitle("⁴", "net"), "", netRows, netW) + "\n" +
+		boxWithTitle(btopTitle("⁵", "gpu"), "", gpuRows, netW)
+	return cpuBox + "\n" + lipgloss.JoinHorizontal(lipgloss.Top, memBox, dskBox, netCol)
 }
 
 // btopTitle renders a border-fused box label like btop's ¹cpu.

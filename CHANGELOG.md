@@ -6,6 +6,16 @@ All notable changes to JEKYO are documented here. The format follows
 may contain breaking changes and patches never do. From 1.0 on, breaking
 changes only land in major versions.
 
+## [0.10.1] - 2026-08-01
+
+### Fixed
+
+- The net box no longer stretches: a gpu box (live nvidia stats, or
+  "no GPU available") shares its column, and the header bottom edge
+  stays flush.
+- Memory rows where high is healthy (Available, Cached, Free) use a
+  calm meter instead of alarm colors; only Used keeps thresholds.
+
 ## [0.10.0] - 2026-08-01
 
 ### Changed
