@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+
 	"github.com/spf13/cobra"
 )
 
@@ -20,6 +22,9 @@ Start with:
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
+	// cobra's Print helpers default to stderr; route normal output to
+	// stdout so pipes and agents see it.
+	root.SetOut(os.Stdout)
 
 	root.PersistentFlags().StringVar(&contextFlag, "context", "", "context (server) to operate on; defaults to the current one")
 	root.PersistentFlags().StringVar(&sshKeyFlag, "ssh-key", "", "SSH private key for server access (default: ssh-agent)")
