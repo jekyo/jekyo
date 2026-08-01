@@ -6,6 +6,19 @@ All notable changes to JEKYO are documented here. The format follows
 may contain breaking changes and patches never do. From 1.0 on, breaking
 changes only land in major versions.
 
+## [0.6.2] - 2026-08-01
+
+### Added
+
+- `jekyo ui` opens with the JEKYO logomark splash while the first
+  snapshot loads.
+
+### Fixed
+
+- The selected service in the sidebar is unmissable now: a pointer and
+  a full-width highlight band instead of a subtle recolor.
+- Inactive tabs show their jump key (logs l, metrics m, status s).
+
 ## [0.6.1] - 2026-08-01
 
 ### Fixed

@@ -20,7 +20,7 @@ var (
 
 	uiHdrStyle = lipgloss.NewStyle().Foreground(uiAmber).Bold(true)
 	uiDimStyle = lipgloss.NewStyle().Foreground(uiDim)
-	uiSelStyle = lipgloss.NewStyle().Background(uiFaint).Foreground(uiAmber).Bold(true)
+	uiSelStyle = lipgloss.NewStyle().Background(lipgloss.Color("238")).Foreground(lipgloss.Color("230")).Bold(true)
 
 	uiPane = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(uiDim).Padding(0, 1)
 
@@ -70,6 +70,53 @@ var uiLogo = []string{
 	"┗┛ ┗┛ ┛┗  ┛ ┗┛",
 }
 
+// uiSplash is the JEKYO logomark on a starfield, shown while the first
+// snapshot loads.
+var uiSplash = []string{
+	` ...  ..      .   .. ..  .. . . . .  ...`,
+	` .     .      .   . .   ..       .  ..  `,
+	`     . ..... .      .    . . . ..      .`,
+	`  ... .. .   ...      ..    ...       ..`,
+	`  .   . . .   .  .   .    .  .  .   .  .`,
+	`  . . .  . .000OOOO00000Q  QQQQL  .  .. `,
+	` .   .  ..0OOOOOOO0000000 .QQQLL     .  `,
+	`    .    OOOOOO0.   .. .                `,
+	` ..     OOO0O   .. . QQ'...LLLLC  . . ..`,
+	` .. . .0OOOO    ..  .QQLQL LCCCC  .     `,
+	` ..   .O000O  ..    .0QLLLLLCCCJ    .   `,
+	`  . .  O0000  . .  . .  QLCCCJJJ  . ... `,
+	`  .. . .000QQ  .    ..  .CCCJJJU........`,
+	` ...    QQQQQQL.     .CCJJJJJJUU.   .   `,
+	`  .       QQQQLLLLLL CCCJJJJUUUY  .     `,
+	` ..  . ..   QQLLLLCC JCJ(  YUYYX.  ..   `,
+	`      .. .     .jLCJ      .YYYYY    .  .`,
+	`  .   . .. .. ..  .      . ...      . . `,
+	` .  .     .    .   . ... ..  .. .    .  `,
+}
+
+// splash colorizes the logomark amber over a dim starfield and centers
+// it with a caption.
+func (m *uiModel) splash() string {
+	const dim, amber, reset = "\033[38;5;240m", "\033[38;5;214m", "\033[0m"
+	var art strings.Builder
+	for _, line := range uiSplash {
+		for _, r := range line {
+			if r == '.' || r == ' ' {
+				art.WriteString(dim + string(r))
+			} else {
+				art.WriteString(amber + string(r))
+			}
+		}
+		art.WriteString(reset + "\n")
+	}
+	caption := lipgloss.JoinVertical(lipgloss.Center,
+		art.String(),
+		uiHdrStyle.Render("JEKYO"),
+		uiDimStyle.Render("connecting to "+m.ctxName+"..."),
+	)
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, caption)
+}
+
 var sparkBlocks = []rune("▁▂▃▄▅▆▇█")
 
 // sparkline renders values scaled to their own max into width runes,
@@ -101,6 +148,10 @@ func sparkline(vals []int64, width int) string {
 func (m *uiModel) View() string {
 	if m.width == 0 {
 		return "loading..."
+	}
+	// first snapshot still loading: show the logomark splash if it fits
+	if len(m.snap.Nodes) == 0 && len(m.rows) == 0 && m.err == "" && m.height >= len(uiSplash)+4 {
+		return m.splash()
 	}
 	leftW := 36
 	if m.width < 90 {
@@ -198,16 +249,17 @@ func (m *uiModel) viewTree(w, h int) string {
 			if p.Status != "Running" {
 				dot = uiRed.Render("●")
 			}
-			line := fmt.Sprintf(" %s %-14s %6s %7s ", dot, truncate(r.service, 14), fmtCPU(p.CPUMilli), fmtMem(p.MemBytes))
-			if lipgloss.Width(line) < inner {
-				line += strings.Repeat(" ", inner-lipgloss.Width(line))
+			body := fmt.Sprintf("%-14s %6s %7s ", truncate(r.service, 14), fmtCPU(p.CPUMilli), fmtMem(p.MemBytes))
+			pad := inner - lipgloss.Width(body) - 4
+			if pad > 0 {
+				body += strings.Repeat(" ", pad)
 			}
 			if i == m.cursor {
-				line = uiSelStyle.Render(line)
+				// pointer + highlight band makes the selection unmissable
+				b.WriteString(uiKey.Render("❯") + " " + dot + " " + uiSelStyle.Render(body) + "\n")
 			} else {
-				line = lipgloss.NewStyle().Foreground(uiText).Render(line)
+				b.WriteString("  " + dot + " " + lipgloss.NewStyle().Foreground(uiText).Render(body) + "\n")
 			}
-			b.WriteString(line + "\n")
 		}
 		lines++
 	}
@@ -219,20 +271,20 @@ func (m *uiModel) viewRight(w, h int) string {
 	key := app + "/" + svc
 
 	tabs := []struct {
-		icon, label string
-		id          int
+		icon, label, key string
+		id               int
 	}{
-		{m.ic("logs"), "logs", tabLogs},
-		{m.ic("chart"), "metrics", tabMetrics},
-		{m.ic("info"), "status", tabStatus},
+		{m.ic("logs"), "logs", "l", tabLogs},
+		{m.ic("chart"), "metrics", "m", tabMetrics},
+		{m.ic("info"), "status", "s", tabStatus},
 	}
 	var tb []string
 	for _, t := range tabs {
-		s := t.icon + " " + t.label
 		if t.id == m.tab {
-			tb = append(tb, uiTabOn.Render(s))
+			tb = append(tb, uiTabOn.Render(t.icon+" "+t.label))
 		} else {
-			tb = append(tb, uiTabOff.Render(s))
+			// show the key on inactive tabs so the jump is discoverable
+			tb = append(tb, uiTabOff.Render(t.icon+" "+t.label+" ")+uiKey.Render(t.key))
 		}
 	}
 	title := lipgloss.JoinHorizontal(lipgloss.Bottom, tb...)
