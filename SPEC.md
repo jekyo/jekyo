@@ -415,10 +415,19 @@ locally — the cluster is the source of truth.
 
 ---
 
-## 5. Component 4 — The dashboard (`jekyo dashboard`)
+## 5. Component 4 — The dashboard (premium, deferred)
 
-A read-only web UI for humans — Lens-adjacent but deliberately minimalist,
-and app-centric rather than resource-centric: it renders JEKYO's model
+Direction (decided 2026-08-01, parked for now): the dashboard is a PAID
+feature, not part of the open-source v1. Shape: a licensed sidecar image
+deployed into the customer's cluster, served as an installable PWA
+(phones included), with live views (SSE) plus scoped write actions
+(restart, rollback) under a narrow RBAC. Premium extras: push
+notifications for crashloops and failed deploys, multi-server accounts.
+Data stays on the customer's server. The open-source v1 ships without any
+dashboard; the CLI and agent skill are the primary UX.
+
+The original read-only design below is kept for reference. App-centric
+rather than resource-centric: it renders JEKYO's model
 (apps, services, domains, releases), not raw k8s objects.
 
 ### 5.1 Modes
@@ -509,9 +518,9 @@ Installer steps implement `Check() / Apply()` so `install` is convergent and
 - **M4 — day-2 UX:** logs/exec/ps/status/restart/rollback/history,
   `schedule:` → CronJob, `jekyo init` + GitHub-hosted template catalog,
   `skill install` + `schema`, CI deploy recipe, polish, docs, examples.
-- **M5 — dashboard:** local mode with all six views + SSE log tail;
-  in-cluster deploy (read-only SA, `--vpn-only` / basic-auth ingress);
-  `?embed=1`. **← v1 release**
+- **M5 — v1 release:** real-hardware validation (amd64, ACME, GPU, VPN
+  from outside), docs freeze, v1.0.0 tag. The dashboard is no longer part
+  of v1 (premium, deferred; see §5).
 - **M6 — backups + in-cluster builds (v1.1):**
   - DONE: `backup:` per volume (cron schedule + S3 target) compiling to
     restic CronJobs; `jekyo backup config|now|ls|restore`; S3 credentials
