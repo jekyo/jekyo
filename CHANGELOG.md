@@ -6,6 +6,15 @@ All notable changes to JEKYO are documented here. The format follows
 may contain breaking changes and patches never do. From 1.0 on, breaking
 changes only land in major versions.
 
+## [0.13.0] - 2026-08-01
+
+### Added
+
+- Server security signals in the `jekyo ui` server box: pending system
+  updates with the security count highlighted, a red reboot-required
+  alert after kernel updates, and failed SSH login attempts from the
+  auth log. All read over SSH, nothing installed on the server.
+
 ## [0.12.0] - 2026-08-01
 
 ### Added

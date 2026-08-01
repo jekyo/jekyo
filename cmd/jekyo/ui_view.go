@@ -285,7 +285,7 @@ func (m *uiModel) viewHeader() string {
 			cpuRows = append(cpuRows, strings.TrimRight(line.String(), " "))
 		}
 	}
-	platW := 34
+	platW := 38
 	cpuW := w - platW - 1
 	failing := 0
 	for _, p := range m.snap.Pods {
@@ -305,14 +305,36 @@ func (m *uiModel) viewHeader() string {
 	}
 	platRows := []string{
 		podsLine,
-		fmt.Sprintf("%s %d  %s %d", uiDimStyle.Render("services"), m.snap.Services, uiDimStyle.Render("domains"), m.snap.Domains),
+		fmt.Sprintf("%s %d %s %s %d", uiDimStyle.Render("services"), m.snap.Services,
+			uiDimStyle.Render("·"), uiDimStyle.Render("domains"), m.snap.Domains),
 	}
 	if m.domain != "" {
-		platRows = append(platRows, uiDimStyle.Render("domain ")+m.domain)
+		platRows = append(platRows, uiDimStyle.Render("domain   ")+uiHdrStyle.Render(m.domain))
 	}
 	platRows = append(platRows,
-		uiDimStyle.Render("k8s   ")+n.K8sVersion,
-		uiDimStyle.Render("jekyo ")+version)
+		uiDimStyle.Render("k8s ")+n.K8sVersion+uiDimStyle.Render("  jekyo ")+version)
+	upd := uiDimStyle.Render("updates  ")
+	switch {
+	case m.updSec > 0:
+		upd += uiAccent.Render(fmt.Sprintf("%d pending (%d security)", m.updTotal, m.updSec))
+	case m.updTotal > 0:
+		upd += fmt.Sprintf("%d pending", m.updTotal)
+	default:
+		upd += uiGreen.Render("up to date")
+	}
+	platRows = append(platRows, upd)
+	var alerts []string
+	if m.reboot {
+		alerts = append(alerts, uiRed.Render(m.ic("warn")+" reboot required"))
+	}
+	if m.sshFails > 20 {
+		alerts = append(alerts, uiAccent.Render(fmt.Sprintf("ssh fails %d", m.sshFails)))
+	} else if m.sshFails >= 0 {
+		alerts = append(alerts, uiDimStyle.Render("ssh fails ")+fmt.Sprintf("%d", m.sshFails))
+	}
+	if len(alerts) > 0 {
+		platRows = append(platRows, strings.Join(alerts, uiDimStyle.Render(" · ")))
+	}
 	for len(platRows)+2 < len(cpuRows)+2 {
 		platRows = append(platRows, "")
 	}

@@ -36,6 +36,10 @@ type snapMsg struct {
 	io     ioRates
 	swapT  int64
 	swapU  int64
+	updTotal int
+	updSec   int
+	reboot   bool
+	sshFails int
 }
 
 type ioRates struct {
@@ -135,6 +139,10 @@ type uiModel struct {
 	mem      memInfo
 	gpu      gpuInfo
 	io       ioRates
+	updTotal int
+	updSec   int
+	reboot   bool
+	sshFails int
 	swapT    int64
 	swapU    int64
 	prevDisk [2]uint64 // cumulative sectors read/written
@@ -162,7 +170,9 @@ func (m *uiModel) gatherCmd() tea.Cmd {
 				"cat /proc/loadavg /proc/uptime 2>/dev/null; echo @@@; cat /proc/stat; echo @@@; cat /proc/meminfo; echo @@@; " +
 					"df -B1 -x tmpfs -x devtmpfs -x overlay --output=target,size,used 2>/dev/null | tail -n +2; echo @@@; " +
 					"cat /sys/class/hwmon/hwmon*/temp1_input 2>/dev/null | sort -rn | head -1; echo @@@; " +
-					"nvidia-smi --query-gpu=utilization.gpu,memory.used,memory.total,temperature.gpu --format=csv,noheader,nounits 2>/dev/null || echo none; echo @@@; cat /proc/diskstats")
+					"nvidia-smi --query-gpu=utilization.gpu,memory.used,memory.total,temperature.gpu --format=csv,noheader,nounits 2>/dev/null || echo none; echo @@@; cat /proc/diskstats; echo @@@; " +
+					"cat /var/lib/update-notifier/updates-available 2>/dev/null; [ -f /var/run/reboot-required ] && echo REBOOT-REQUIRED; echo @@@; " +
+					"sudo -n grep -c 'Failed password' /var/log/auth.log 2>/dev/null || echo -1")
 			if err == nil {
 				parts := strings.Split(out, "@@@")
 				if len(parts) > 0 {
@@ -267,6 +277,27 @@ func (m *uiModel) gatherCmd() tea.Cmd {
 					}
 					m.prevDisk = [2]uint64{rd, wr}
 					m.prevDiskAt = now
+				}
+				if len(parts) > 7 {
+					up := parts[7]
+					for _, l := range strings.Split(up, "\n") {
+						l = strings.TrimSpace(l)
+						var n int
+						if _, err := fmt.Sscanf(l, "%d updates can be applied", &n); err == nil {
+							msg.updTotal = n
+						}
+						if _, err := fmt.Sscanf(l, "%d of these updates is a standard security update", &n); err == nil {
+							msg.updSec += n
+						}
+						if _, err := fmt.Sscanf(l, "%d of these updates are standard security updates", &n); err == nil {
+							msg.updSec += n
+						}
+					}
+					msg.reboot = strings.Contains(up, "REBOOT-REQUIRED")
+				}
+				if len(parts) > 8 {
+					msg.sshFails = -1
+					fmt.Sscanf(strings.TrimSpace(parts[8]), "%d", &msg.sshFails)
 				}
 				if len(parts) > 5 {
 					g := strings.TrimSpace(parts[5])
@@ -595,6 +626,7 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.io = msg.io
 		m.swapT, m.swapU = msg.swapT, msg.swapU
+		m.updTotal, m.updSec, m.reboot, m.sshFails = msg.updTotal, msg.updSec, msg.reboot, msg.sshFails
 		m.err = ""
 		m.rebuildRows()
 		m.appendHist()
