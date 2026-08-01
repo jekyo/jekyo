@@ -1,8 +1,10 @@
 # JEKYO
 
-A personal PaaS on k3s: one command turns a bare Ubuntu server into a
-batteries-included cluster, and one `jekyo.yaml` file describes an app —
-build, runtime, routing, volumes — end to end.
+**Stop doing ops.** JEKYO turns a $50 server into your own cloud: one
+command installs a batteries-included Kubernetes cluster, one `jekyo.yaml`
+describes an app end to end — build, domains, TLS, volumes, GPUs. Same
+benefits as managed cloud at a tenth of the cost, and built to be operated
+by AI agents: your DevOps team is `/jekyo deploy this`.
 
 ```sh
 jekyo server install root@1.2.3.4 --ip 1.2.3.4 --storage /storage \

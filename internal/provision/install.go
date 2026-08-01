@@ -120,6 +120,9 @@ func (in *Installer) Install(f Facts, creds Credentials) error {
 			"--kubelet-arg=allowed-unsafe-sysctls=net.*",
 			"--write-kubeconfig-mode 640",
 		}
+		if cfg.InternalDomain != "" && cfg.InternalDomain != "cluster.local" {
+			flags = append(flags, "--cluster-domain "+cfg.InternalDomain)
+		}
 		cmd := fmt.Sprintf(
 			"curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION=%q sh -s - server %s",
 			version, strings.Join(flags, " "))

@@ -213,6 +213,7 @@ func newServerInstallCmd() *cobra.Command {
 	cmd.Flags().StringVar(&cfg.IP, "ip", "", "public IP of the server (required)")
 	cmd.Flags().StringVar(&cfg.StoragePath, "storage", "/storage", "persisted local volume path")
 	cmd.Flags().StringVar(&cfg.Domain, "domain", "", "base domain (enables TLS certs, registry.<domain>, vpn.<domain>)")
+	cmd.Flags().StringVar(&cfg.InternalDomain, "internal-domain", "cluster.local", "cluster-internal DNS suffix (e.g. jekyo.internal); affects only in-cluster/VPN names")
 	cmd.Flags().StringVar(&cfg.AcmeEmail, "acme-email", "", "Let's Encrypt account email (required with --domain)")
 	cmd.Flags().StringVar(&name, "name", "", "context name (default: derived from --ip)")
 	cmd.Flags().StringVar(&cfg.K3sVersion, "k3s-version", "", "k3s version (default "+provision.DefaultK3sVersion+")")

@@ -47,6 +47,7 @@ jekyo server install <ssh-target> \
   --domain <base-domain>      # optional: enables registry.<domain>, vpn.<domain>
   --acme-email <email>        # required if --domain: Let's Encrypt registration
   --name <context-name>       # default: derived from host
+  --internal-domain <suffix>  # cluster DNS suffix (default cluster.local; e.g. jekyo.internal)
   --no-vpn --no-gpu --no-registry   # opt-outs
   --fix                       # auto-remediate fixable preflight warnings (2.3)
   --remove-docker             # purge a detected Docker engine (never implicit)
@@ -219,7 +220,8 @@ volumes:                            # local-path PVCs
 
 ### 3.2 Semantics
 
-- **`app`** — names the app and its namespace; every generated resource is
+- **`app`** — names the app; its namespace is `jekyo-<app>` (grouped and
+  recognizable in kubectl, isolated per app). Every generated resource is
   labeled `jekyo.io/app`, `jekyo.io/service`, `jekyo.io/revision`.
 - **`resources`** — flat keys: `cpu` and `memory` are what the service is
   guaranteed (k8s requests); `cpu-max` and `memory-max` are hard caps (k8s

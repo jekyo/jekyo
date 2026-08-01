@@ -68,7 +68,7 @@ func newPsCmd() *cobra.Command {
 			ns := ""
 			if len(args) == 1 {
 				app, svc := splitTarget(args[0])
-				ns, sel = app, podSelector(app, svc)
+				ns, sel = compile.NamespaceFor(app), podSelector(app, svc)
 			}
 			pods, err := d.Client.Typed.CoreV1().Pods(ns).List(ctx, metav1.ListOptions{LabelSelector: sel})
 			if err != nil {
@@ -140,7 +140,7 @@ func newLogsCmd() *cobra.Command {
 				return err
 			}
 			ctx := cmd.Context()
-			pods, err := d.Client.Typed.CoreV1().Pods(appName).List(ctx, metav1.ListOptions{LabelSelector: podSelector(appName, svc)})
+			pods, err := d.Client.Typed.CoreV1().Pods(compile.NamespaceFor(appName)).List(ctx, metav1.ListOptions{LabelSelector: podSelector(appName, svc)})
 			if err != nil {
 				return err
 			}
@@ -164,7 +164,7 @@ func newLogsCmd() *cobra.Command {
 			prefix := len(pods.Items) > 1
 			var wg sync.WaitGroup
 			for _, p := range pods.Items {
-				rc, err := d.Client.Typed.CoreV1().Pods(appName).GetLogs(p.Name, opts).Stream(ctx)
+				rc, err := d.Client.Typed.CoreV1().Pods(compile.NamespaceFor(appName)).GetLogs(p.Name, opts).Stream(ctx)
 				if err != nil {
 					fmt.Fprintf(cmd.ErrOrStderr(), "%s: %v\n", p.Name, err)
 					continue
@@ -213,7 +213,7 @@ func newExecCmd() *cobra.Command {
 				return err
 			}
 			ctx := cmd.Context()
-			pods, err := d.Client.Typed.CoreV1().Pods(appName).List(ctx, metav1.ListOptions{LabelSelector: podSelector(appName, svc)})
+			pods, err := d.Client.Typed.CoreV1().Pods(compile.NamespaceFor(appName)).List(ctx, metav1.ListOptions{LabelSelector: podSelector(appName, svc)})
 			if err != nil {
 				return err
 			}
@@ -230,7 +230,7 @@ func newExecCmd() *cobra.Command {
 
 			interactive := term.IsTerminal(int(os.Stdin.Fd()))
 			req := d.Client.Typed.CoreV1().RESTClient().Post().
-				Resource("pods").Namespace(appName).Name(pod.Name).SubResource("exec").
+				Resource("pods").Namespace(compile.NamespaceFor(appName)).Name(pod.Name).SubResource("exec").
 				VersionedParams(&corev1.PodExecOptions{
 					Container: svc,
 					Command:   command,
@@ -276,22 +276,22 @@ func newRestartCmd() *cobra.Command {
 				time.Now().UTC().Format(time.RFC3339)))
 			restarted := 0
 			sel := metav1.ListOptions{LabelSelector: podSelector(appName, svc)}
-			deps, err := d.Client.Typed.AppsV1().Deployments(appName).List(ctx, sel)
+			deps, err := d.Client.Typed.AppsV1().Deployments(compile.NamespaceFor(appName)).List(ctx, sel)
 			if err != nil {
 				return err
 			}
 			for _, dep := range deps.Items {
-				if _, err := d.Client.Typed.AppsV1().Deployments(appName).Patch(ctx, dep.Name, types.StrategicMergePatchType, patch, metav1.PatchOptions{}); err != nil {
+				if _, err := d.Client.Typed.AppsV1().Deployments(compile.NamespaceFor(appName)).Patch(ctx, dep.Name, types.StrategicMergePatchType, patch, metav1.PatchOptions{}); err != nil {
 					return err
 				}
 				restarted++
 			}
-			stss, err := d.Client.Typed.AppsV1().StatefulSets(appName).List(ctx, sel)
+			stss, err := d.Client.Typed.AppsV1().StatefulSets(compile.NamespaceFor(appName)).List(ctx, sel)
 			if err != nil {
 				return err
 			}
 			for _, sts := range stss.Items {
-				if _, err := d.Client.Typed.AppsV1().StatefulSets(appName).Patch(ctx, sts.Name, types.StrategicMergePatchType, patch, metav1.PatchOptions{}); err != nil {
+				if _, err := d.Client.Typed.AppsV1().StatefulSets(compile.NamespaceFor(appName)).Patch(ctx, sts.Name, types.StrategicMergePatchType, patch, metav1.PatchOptions{}); err != nil {
 					return err
 				}
 				restarted++
@@ -328,15 +328,15 @@ func newStatusCmd() *cobra.Command {
 			fmt.Fprintf(out, "App:      %s (revision %d, deployed %s)\n", appName, last.Revision, ago(last.DeployedAt))
 
 			w := tabwriter.NewWriter(out, 2, 4, 2, ' ', 0)
-			deps, _ := d.Client.Typed.AppsV1().Deployments(appName).List(ctx, metav1.ListOptions{LabelSelector: compile.LabelApp})
+			deps, _ := d.Client.Typed.AppsV1().Deployments(compile.NamespaceFor(appName)).List(ctx, metav1.ListOptions{LabelSelector: compile.LabelApp})
 			for _, dep := range deps.Items {
 				fmt.Fprintf(w, "  %s\tdeployment\t%d/%d ready\n", dep.Name, dep.Status.ReadyReplicas, dep.Status.Replicas)
 			}
-			stss, _ := d.Client.Typed.AppsV1().StatefulSets(appName).List(ctx, metav1.ListOptions{LabelSelector: compile.LabelApp})
+			stss, _ := d.Client.Typed.AppsV1().StatefulSets(compile.NamespaceFor(appName)).List(ctx, metav1.ListOptions{LabelSelector: compile.LabelApp})
 			for _, sts := range stss.Items {
 				fmt.Fprintf(w, "  %s\tstatefulset\t%d/%d ready\n", sts.Name, sts.Status.ReadyReplicas, sts.Status.Replicas)
 			}
-			cjs, _ := d.Client.Typed.BatchV1().CronJobs(appName).List(ctx, metav1.ListOptions{LabelSelector: compile.LabelApp})
+			cjs, _ := d.Client.Typed.BatchV1().CronJobs(compile.NamespaceFor(appName)).List(ctx, metav1.ListOptions{LabelSelector: compile.LabelApp})
 			for _, cj := range cjs.Items {
 				lastRun := "never"
 				if cj.Status.LastScheduleTime != nil {
@@ -346,7 +346,7 @@ func newStatusCmd() *cobra.Command {
 			}
 			w.Flush()
 
-			ings, _ := d.Client.Typed.NetworkingV1().Ingresses(appName).List(ctx, metav1.ListOptions{LabelSelector: compile.LabelApp})
+			ings, _ := d.Client.Typed.NetworkingV1().Ingresses(compile.NamespaceFor(appName)).List(ctx, metav1.ListOptions{LabelSelector: compile.LabelApp})
 			for _, ing := range ings.Items {
 				for _, r := range ing.Spec.Rules {
 					tls := "http"
@@ -354,7 +354,7 @@ func newStatusCmd() *cobra.Command {
 						for _, h := range t.Hosts {
 							if h == r.Host {
 								tls = "https"
-								if sec, err := d.Client.Typed.CoreV1().Secrets(appName).Get(ctx, t.SecretName, metav1.GetOptions{}); err != nil || len(sec.Data["tls.crt"]) == 0 {
+								if sec, err := d.Client.Typed.CoreV1().Secrets(compile.NamespaceFor(appName)).Get(ctx, t.SecretName, metav1.GetOptions{}); err != nil || len(sec.Data["tls.crt"]) == 0 {
 									tls = "https (certificate pending)"
 								}
 							}
@@ -364,7 +364,7 @@ func newStatusCmd() *cobra.Command {
 				}
 			}
 
-			events, _ := d.Client.Typed.CoreV1().Events(appName).List(ctx, metav1.ListOptions{})
+			events, _ := d.Client.Typed.CoreV1().Events(compile.NamespaceFor(appName)).List(ctx, metav1.ListOptions{})
 			var warnings []corev1.Event
 			for _, e := range events.Items {
 				if e.Type == corev1.EventTypeWarning {

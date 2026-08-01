@@ -30,6 +30,12 @@ const (
 	kcertLabel   = "kcert.dev/ingress"
 )
 
+// NamespaceFor groups all JEKYO apps under a recognizable prefix while
+// keeping one namespace per app (isolation, future quotas).
+func NamespaceFor(appName string) string {
+	return "jekyo-" + appName
+}
+
 // PullSecret authenticates image pulls from one external registry host.
 type PullSecret struct {
 	Host     string
@@ -121,7 +127,7 @@ func dockerConfigSecret(app *dsl.App, pull []PullSecret) (*corev1.Secret, error)
 	}
 	return &corev1.Secret{
 		TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "Secret"},
-		ObjectMeta: metav1.ObjectMeta{Name: pullSecretName, Namespace: app.Name, Labels: labels(app, "")},
+		ObjectMeta: metav1.ObjectMeta{Name: pullSecretName, Namespace: NamespaceFor(app.Name), Labels: labels(app, "")},
 		Type:       corev1.SecretTypeDockerConfigJson,
 		Data:       map[string][]byte{corev1.DockerConfigJsonKey: cfg},
 	}, nil
@@ -138,7 +144,7 @@ func labels(app *dsl.App, svc string) map[string]string {
 func namespace(app *dsl.App) *corev1.Namespace {
 	return &corev1.Namespace{
 		TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "Namespace"},
-		ObjectMeta: metav1.ObjectMeta{Name: app.Name, Labels: labels(app, "")},
+		ObjectMeta: metav1.ObjectMeta{Name: NamespaceFor(app.Name), Labels: labels(app, "")},
 	}
 }
 
@@ -163,7 +169,7 @@ func standalonePVC(app *dsl.App, volName string) *corev1.PersistentVolumeClaim {
 	vol := app.Volumes[volName]
 	pvc := &corev1.PersistentVolumeClaim{
 		TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "PersistentVolumeClaim"},
-		ObjectMeta: metav1.ObjectMeta{Name: volName, Namespace: app.Name, Labels: labels(app, "")},
+		ObjectMeta: metav1.ObjectMeta{Name: volName, Namespace: NamespaceFor(app.Name), Labels: labels(app, "")},
 		Spec: corev1.PersistentVolumeClaimSpec{
 			AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
 			Resources: corev1.VolumeResourceRequirements{
@@ -195,7 +201,7 @@ func workload(app *dsl.App, name string, svc dsl.Service, withPullSecret bool, s
 		podSpec.RestartPolicy = corev1.RestartPolicyOnFailure
 		return &batchv1.CronJob{
 			TypeMeta:   metav1.TypeMeta{APIVersion: "batch/v1", Kind: "CronJob"},
-			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: app.Name, Labels: labels(app, name)},
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: NamespaceFor(app.Name), Labels: labels(app, name)},
 			Spec: batchv1.CronJobSpec{
 				Schedule:          svc.Schedule,
 				ConcurrencyPolicy: batchv1.ForbidConcurrent,
@@ -213,7 +219,7 @@ func workload(app *dsl.App, name string, svc dsl.Service, withPullSecret bool, s
 	}
 
 	replicas := int32(svc.ReplicaCount())
-	meta := metav1.ObjectMeta{Name: name, Namespace: app.Name, Labels: labels(app, name)}
+	meta := metav1.ObjectMeta{Name: name, Namespace: NamespaceFor(app.Name), Labels: labels(app, name)}
 	selector := &metav1.LabelSelector{MatchLabels: labels(app, name)}
 	podTmpl := corev1.PodTemplateSpec{
 		ObjectMeta: metav1.ObjectMeta{Labels: labels(app, name)},
@@ -382,7 +388,7 @@ func service(app *dsl.App, name string, svc dsl.Service) []runtime.Object {
 		}
 		objs = append(objs, &corev1.Service{
 			TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "Service"},
-			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: app.Name, Labels: labels(app, name)},
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: NamespaceFor(app.Name), Labels: labels(app, name)},
 			Spec: corev1.ServiceSpec{
 				Selector: labels(app, name),
 				Ports:    sp,
@@ -403,7 +409,7 @@ func service(app *dsl.App, name string, svc dsl.Service) []runtime.Object {
 		}
 		objs = append(objs, &corev1.Service{
 			TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "Service"},
-			ObjectMeta: metav1.ObjectMeta{Name: name + "-nodeport", Namespace: app.Name, Labels: labels(app, name)},
+			ObjectMeta: metav1.ObjectMeta{Name: name + "-nodeport", Namespace: NamespaceFor(app.Name), Labels: labels(app, name)},
 			Spec: corev1.ServiceSpec{
 				Type:     corev1.ServiceTypeNodePort,
 				Selector: labels(app, name),
@@ -423,7 +429,7 @@ func ingress(app *dsl.App, name string, svc dsl.Service) *networkingv1.Ingress {
 	tls := h.TLS == nil || *h.TLS
 	pathType := networkingv1.PathTypePrefix
 
-	meta := metav1.ObjectMeta{Name: name, Namespace: app.Name, Labels: labels(app, name)}
+	meta := metav1.ObjectMeta{Name: name, Namespace: NamespaceFor(app.Name), Labels: labels(app, name)}
 	ing := &networkingv1.Ingress{
 		TypeMeta:   metav1.TypeMeta{APIVersion: "networking.k8s.io/v1", Kind: "Ingress"},
 		ObjectMeta: meta,

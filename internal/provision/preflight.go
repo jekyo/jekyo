@@ -29,6 +29,7 @@ type Config struct {
 	StoragePath  string
 	Domain       string
 	AcmeEmail    string
+	InternalDomain string
 	NoVPN        bool
 	NoGPU        bool
 	NoRegistry   bool

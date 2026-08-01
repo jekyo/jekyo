@@ -76,7 +76,7 @@ func TestCompileFull(t *testing.T) {
 		}
 	}
 
-	if ns == nil || ns.Name != "acme" || ns.Labels[LabelApp] != "acme" {
+	if ns == nil || ns.Name != "jekyo-acme" || ns.Labels[LabelApp] != "acme" {
 		t.Fatalf("namespace: %+v", ns)
 	}
 	if len(deps) != 2 || len(stss) != 1 || len(svcs) != 3 || len(ings) != 1 {

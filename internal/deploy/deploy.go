@@ -67,8 +67,9 @@ func (d *Deployer) Apply(ctx context.Context, appName string, objs []runtime.Obj
 // longer produces (e.g. a service removed from jekyo.yaml).
 func (d *Deployer) prune(ctx context.Context, appName string, applied map[string]bool) error {
 	sel := compile.LabelApp + "=" + appName
+	ns := compile.NamespaceFor(appName)
 	for _, gvr := range kube.PrunableGVRs() {
-		list, err := d.Client.Dynamic.Resource(gvr).Namespace(appName).List(ctx, metav1.ListOptions{LabelSelector: sel})
+		list, err := d.Client.Dynamic.Resource(gvr).Namespace(ns).List(ctx, metav1.ListOptions{LabelSelector: sel})
 		if err != nil {
 			if errors.IsNotFound(err) {
 				continue // CRD (e.g. HTTPProxy) not installed on this cluster
@@ -78,7 +79,7 @@ func (d *Deployer) prune(ctx context.Context, appName string, applied map[string
 		for _, item := range list.Items {
 			key := gvr.Resource + "/" + item.GetNamespace() + "/" + item.GetName()
 			if !applied[key] {
-				if err := d.Client.Dynamic.Resource(gvr).Namespace(appName).Delete(ctx, item.GetName(), metav1.DeleteOptions{}); err != nil && !errors.IsNotFound(err) {
+				if err := d.Client.Dynamic.Resource(gvr).Namespace(ns).Delete(ctx, item.GetName(), metav1.DeleteOptions{}); err != nil && !errors.IsNotFound(err) {
 					return fmt.Errorf("prune: deleting %s %s: %w", gvr.Resource, item.GetName(), err)
 				}
 			}
@@ -104,7 +105,7 @@ func (d *Deployer) recordRelease(ctx context.Context, appName string, objs []run
 	secret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      fmt.Sprintf("jekyo-release-v%d", next),
-			Namespace: appName,
+			Namespace: compile.NamespaceFor(appName),
 			Labels: map[string]string{
 				compile.LabelApp: appName,
 				releaseLabel:     strconv.Itoa(next),
@@ -114,12 +115,12 @@ func (d *Deployer) recordRelease(ctx context.Context, appName string, objs []run
 		Type: "jekyo.io/release",
 		Data: map[string][]byte{"manifest.yaml": []byte(manifest)},
 	}
-	if _, err := d.Client.Typed.CoreV1().Secrets(appName).Create(ctx, secret, metav1.CreateOptions{}); err != nil {
+	if _, err := d.Client.Typed.CoreV1().Secrets(compile.NamespaceFor(appName)).Create(ctx, secret, metav1.CreateOptions{}); err != nil {
 		return 0, err
 	}
 	// Keep the last 10 revisions.
 	for len(revs) >= 10 {
-		if err := d.Client.Typed.CoreV1().Secrets(appName).Delete(ctx, revs[0].Name, metav1.DeleteOptions{}); err != nil && !errors.IsNotFound(err) {
+		if err := d.Client.Typed.CoreV1().Secrets(compile.NamespaceFor(appName)).Delete(ctx, revs[0].Name, metav1.DeleteOptions{}); err != nil && !errors.IsNotFound(err) {
 			return 0, err
 		}
 		revs = revs[1:]
@@ -137,7 +138,7 @@ type Release struct {
 
 // Releases lists an app's releases, oldest first.
 func (d *Deployer) Releases(ctx context.Context, appName string) ([]Release, error) {
-	list, err := d.Client.Typed.CoreV1().Secrets(appName).List(ctx, metav1.ListOptions{LabelSelector: releaseLabel})
+	list, err := d.Client.Typed.CoreV1().Secrets(compile.NamespaceFor(appName)).List(ctx, metav1.ListOptions{LabelSelector: releaseLabel})
 	if err != nil {
 		if errors.IsNotFound(err) {
 			return nil, nil
@@ -176,7 +177,11 @@ func (d *Deployer) List(ctx context.Context) ([]AppInfo, error) {
 	}
 	var out []AppInfo
 	for _, ns := range nss.Items {
-		info := AppInfo{Name: ns.Name, Age: time.Since(ns.CreationTimestamp.Time)}
+		appName := ns.Labels[compile.LabelApp]
+		if appName == "" {
+			continue
+		}
+		info := AppInfo{Name: appName, Age: time.Since(ns.CreationTimestamp.Time)}
 
 		pods, err := d.Client.Typed.CoreV1().Pods(ns.Name).List(ctx, metav1.ListOptions{LabelSelector: compile.LabelApp})
 		if err != nil {
@@ -205,7 +210,7 @@ func (d *Deployer) List(ctx context.Context) ([]AppInfo, error) {
 				}
 			}
 		}
-		if revs, err := d.Releases(ctx, ns.Name); err == nil && len(revs) > 0 {
+		if revs, err := d.Releases(ctx, appName); err == nil && len(revs) > 0 {
 			info.Revision = revs[len(revs)-1].Revision
 		}
 		out = append(out, info)
@@ -218,7 +223,7 @@ func (d *Deployer) List(ctx context.Context) ([]AppInfo, error) {
 // unless withVolumes is set, in which case the whole namespace goes.
 func (d *Deployer) Down(ctx context.Context, appName string, withVolumes bool) error {
 	if withVolumes {
-		err := d.Client.Typed.CoreV1().Namespaces().Delete(ctx, appName, metav1.DeleteOptions{})
+		err := d.Client.Typed.CoreV1().Namespaces().Delete(ctx, compile.NamespaceFor(appName), metav1.DeleteOptions{})
 		if errors.IsNotFound(err) {
 			return fmt.Errorf("app %q is not deployed", appName)
 		}

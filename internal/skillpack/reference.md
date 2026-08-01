@@ -7,7 +7,7 @@ invent keys — unknown keys are hard errors.
 ## File shape
 
 ```yaml
-app: myapp              # required; lowercase alphanumeric/dashes; becomes the namespace
+app: myapp              # required; lowercase alphanumeric/dashes; namespace becomes jekyo-<name>
 description: One-liner  # optional metadata
 icon: https://.../logo.png   # optional metadata
 
