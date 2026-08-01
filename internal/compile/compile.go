@@ -59,12 +59,20 @@ func Compile(app *dsl.App, opts Options) ([]runtime.Object, error) {
 		objs = append(objs, sec)
 	}
 
+	// Volumes mounted by several services become standalone PVCs shared
+	// between their pods (single-node RWO); single-service volumes stay
+	// volumeClaimTemplates on their StatefulSet.
+	shared := sharedVolumes(app)
+	for _, volName := range sortedKeys(shared) {
+		objs = append(objs, standalonePVC(app, volName))
+	}
+
 	for _, name := range sortedKeys(app.Services) {
 		svc := app.Services[name]
 		if svc.Image == "" {
 			return nil, fmt.Errorf("service %s: build: must be resolved before compile (internal error) — or use image:", name)
 		}
-		workload, err := workload(app, name, svc, len(pull) > 0)
+		workload, err := workload(app, name, svc, len(pull) > 0, shared)
 		if err != nil {
 			return nil, err
 		}
@@ -134,7 +142,42 @@ func namespace(app *dsl.App) *corev1.Namespace {
 	}
 }
 
-func workload(app *dsl.App, name string, svc dsl.Service, withPullSecret bool) (runtime.Object, error) {
+// sharedVolumes returns volumes mounted by more than one service.
+func sharedVolumes(app *dsl.App) map[string]bool {
+	count := map[string]int{}
+	for _, svc := range app.Services {
+		for vol := range svc.Volumes {
+			count[vol]++
+		}
+	}
+	out := map[string]bool{}
+	for vol, n := range count {
+		if n > 1 {
+			out[vol] = true
+		}
+	}
+	return out
+}
+
+func standalonePVC(app *dsl.App, volName string) *corev1.PersistentVolumeClaim {
+	vol := app.Volumes[volName]
+	pvc := &corev1.PersistentVolumeClaim{
+		TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "PersistentVolumeClaim"},
+		ObjectMeta: metav1.ObjectMeta{Name: volName, Namespace: app.Name, Labels: labels(app, "")},
+		Spec: corev1.PersistentVolumeClaimSpec{
+			AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+			Resources: corev1.VolumeResourceRequirements{
+				Requests: corev1.ResourceList{corev1.ResourceStorage: resource.MustParse(vol.Size)},
+			},
+		},
+	}
+	if vol.Class != "" {
+		pvc.Spec.StorageClassName = &vol.Class
+	}
+	return pvc
+}
+
+func workload(app *dsl.App, name string, svc dsl.Service, withPullSecret bool, shared map[string]bool) (runtime.Object, error) {
 	container, err := container(name, svc)
 	if err != nil {
 		return nil, err
@@ -191,6 +234,19 @@ func workload(app *dsl.App, name string, svc dsl.Service, withPullSecret bool) (
 
 	var claims []corev1.PersistentVolumeClaim
 	for _, volName := range sortedKeys(svc.Volumes) {
+		vm := svc.Volumes[volName]
+		podTmpl.Spec.Containers[0].VolumeMounts = append(podTmpl.Spec.Containers[0].VolumeMounts,
+			corev1.VolumeMount{Name: volName, MountPath: vm.Path, SubPath: vm.Subpath})
+		if shared[volName] {
+			// Mount the app-shared PVC instead of claiming a private one.
+			podTmpl.Spec.Volumes = append(podTmpl.Spec.Volumes, corev1.Volume{
+				Name: volName,
+				VolumeSource: corev1.VolumeSource{
+					PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: volName},
+				},
+			})
+			continue
+		}
 		vol := app.Volumes[volName]
 		claim := corev1.PersistentVolumeClaim{
 			ObjectMeta: metav1.ObjectMeta{Name: volName},
@@ -205,8 +261,6 @@ func workload(app *dsl.App, name string, svc dsl.Service, withPullSecret bool) (
 			claim.Spec.StorageClassName = &vol.Class
 		}
 		claims = append(claims, claim)
-		podTmpl.Spec.Containers[0].VolumeMounts = append(podTmpl.Spec.Containers[0].VolumeMounts,
-			corev1.VolumeMount{Name: volName, MountPath: svc.Volumes[volName]})
 	}
 
 	return &appsv1.StatefulSet{
@@ -261,14 +315,19 @@ func container(name string, svc dsl.Service) (*corev1.Container, error) {
 	c.Resources = res
 
 	if h := svc.Health; h != nil {
-		port := h.Port
-		if port == 0 {
-			port = svc.MainPort()
-		}
-		probe := &corev1.Probe{
-			ProbeHandler: corev1.ProbeHandler{
+		probe := &corev1.Probe{}
+		if len(h.Command) > 0 {
+			probe.ProbeHandler = corev1.ProbeHandler{
+				Exec: &corev1.ExecAction{Command: h.Command},
+			}
+		} else {
+			port := h.Port
+			if port == 0 {
+				port = svc.MainPort()
+			}
+			probe.ProbeHandler = corev1.ProbeHandler{
 				HTTPGet: &corev1.HTTPGetAction{Path: h.Path, Port: intstr.FromInt32(int32(port))},
-			},
+			}
 		}
 		c.ReadinessProbe = probe
 		liveness := *probe

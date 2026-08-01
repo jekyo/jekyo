@@ -322,11 +322,33 @@ jekyo init postgres             # write a ready-to-edit jekyo.yaml
 ```
 
 Templates are ordinary jekyo.yaml files with `description:` and `icon:`
-metadata, hosted in a public GitHub repo (`jekyo-templates`) with an
+metadata, hosted in a public GitHub repo (`jekyo/templates`) with an
 `index.yaml` — so the catalog grows and updates without cutting a CLI
 release. `jekyo init` fetches from the catalog (raw.githubusercontent) and
 falls back to a small embedded set (postgres, redis, static site) when
 offline. The dashboard renders the same descriptions/icons.
+
+**Template inputs.** Templates declare what they need in an `inputs:`
+block — each input has a `kind` (`domain` | `secret` | `string` | `size`),
+an optional `prompt`, `default`, and `required` (default true; secrets
+auto-generate when not provided). Two resolution modes:
+
+- *Interactive:* `jekyo init <name>` prompts for each unresolved input.
+- *Automated (AI/CI):* `jekyo templates inspect <name> -o json` exposes the
+  requirements schema; `jekyo init <name> --set key=value... --defaults`
+  resolves non-interactively and fails listing any missing required input.
+
+Resolution substitutes non-secret values (domains, sizes) into the written
+jekyo.yaml, generates/collects secrets into a `.env` file (gitignored, the
+yaml keeps `${VARS}`), and strips the `inputs:` block. Templates prefer a
+single volume per app (services mount subpaths) so one size question
+covers storage.
+
+The catalog is seeded by converting Coolify's Apache-2.0 compose templates
+(362 services; attribution in the repo): their magic vars map cleanly
+(`$SERVICE_PASSWORD_X` → secret input, `$SERVICE_URL_X` → domain input,
+`${X:-def}` → optional input with default, `${X}` → required input), a
+converter does the bulk, curation makes them good.
 
 ### 4.2 Deploy from CI (push-to-deploy)
 

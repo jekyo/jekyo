@@ -19,6 +19,12 @@ func Parse(data []byte, env map[string]string) (*App, error) {
 	if err := yaml.UnmarshalWithOptions(data, &app, yaml.Strict()); err != nil {
 		return nil, fmt.Errorf("jekyo.yaml: %w", err)
 	}
+	if len(app.Inputs) > 0 {
+		// Template with unresolved inputs: skip interpolation so validate
+		// reports the real problem (use jekyo init) instead of a missing
+		// variable.
+		return nil, validate(&app)
+	}
 	for name, svc := range app.Services {
 		for k, v := range svc.Env {
 			iv, err := interpolate(v, env)
@@ -93,6 +99,9 @@ func validate(app *App) error {
 	if len(app.Services) == 0 {
 		bad("services: at least one service is required")
 	}
+	if len(app.Inputs) > 0 {
+		bad("inputs: this file is a template with unresolved inputs — start from it with 'jekyo init'")
+	}
 
 	for _, name := range sortedKeys(app.Services) {
 		svc := app.Services[name]
@@ -152,8 +161,16 @@ func validate(app *App) error {
 				bad("%s: volume %q is not declared in the top-level volumes: block", p, vol)
 			}
 		}
-		if svc.Health != nil && svc.Health.Path == "" {
-			bad("%s: health.path is required", p)
+		if svc.Health != nil && svc.Health.Path == "" && len(svc.Health.Command) == 0 {
+			bad("%s: health needs path (HTTP probe) or command (exec probe)", p)
+		}
+		if svc.Health != nil && svc.Health.Path != "" && len(svc.Health.Command) > 0 {
+			bad("%s: health.path and health.command are mutually exclusive", p)
+		}
+		for vol, vm := range svc.Volumes {
+			if vm.Path == "" {
+				bad("%s: volume %s needs a mount path", p, vol)
+			}
 		}
 		if svc.Schedule != "" {
 			if svc.HTTP != nil || svc.Replicas != nil || len(svc.Volumes) > 0 || len(svc.Expose) > 0 {

@@ -42,6 +42,7 @@ func New(kubeconfigPath string) (*Client, error) {
 // learns a new kind.
 var gvrs = map[schema.GroupVersionKind]schema.GroupVersionResource{
 	{Version: "v1", Kind: "Namespace"}:                                      {Version: "v1", Resource: "namespaces"},
+	{Version: "v1", Kind: "PersistentVolumeClaim"}:                          {Version: "v1", Resource: "persistentvolumeclaims"},
 	{Version: "v1", Kind: "Service"}:                                        {Version: "v1", Resource: "services"},
 	{Version: "v1", Kind: "Secret"}:                                         {Version: "v1", Resource: "secrets"},
 	{Version: "v1", Kind: "ConfigMap"}:                                      {Version: "v1", Resource: "configmaps"},

@@ -15,6 +15,27 @@ type App struct {
 	Icon        string             `yaml:"icon"`
 	Services    map[string]Service `yaml:"services"`
 	Volumes     map[string]Volume  `yaml:"volumes"`
+	// Inputs exist only in templates; `jekyo init` resolves and strips
+	// them. A deployable app must not carry unresolved inputs.
+	Inputs map[string]Input `yaml:"inputs"`
+}
+
+// Input is a template parameter (SPEC §4.1).
+type Input struct {
+	Kind    string `yaml:"kind"` // domain | secret | string | size
+	Prompt  string `yaml:"prompt"`
+	Default string `yaml:"default"`
+	// Required defaults to true, except for secrets (auto-generated) and
+	// inputs with a default.
+	Required *bool `yaml:"required"`
+}
+
+// IsRequired resolves the Required default.
+func (i Input) IsRequired() bool {
+	if i.Required != nil {
+		return *i.Required
+	}
+	return i.Kind != "secret" && i.Default == ""
 }
 
 type Service struct {
@@ -41,8 +62,32 @@ type Service struct {
 	Stateful  *bool     `yaml:"stateful"`
 	Health    *Health   `yaml:"health"`
 	GPU       GPU       `yaml:"gpu"`
-	// Volumes maps a volume name (declared top-level) to a mount path.
-	Volumes map[string]string `yaml:"volumes"`
+	// Volumes maps a volume name (declared top-level) to a mount: either
+	// a plain path string or {path, subpath} to share one volume between
+	// services.
+	Volumes map[string]VolumeMount `yaml:"volumes"`
+}
+
+// VolumeMount accepts a string (the mount path) or a mapping with an
+// optional subpath, letting several services share one volume.
+type VolumeMount struct {
+	Path    string `yaml:"path"`
+	Subpath string `yaml:"subpath"`
+}
+
+func (v *VolumeMount) UnmarshalYAML(unmarshal func(any) error) error {
+	var s string
+	if err := unmarshal(&s); err == nil {
+		v.Path = s
+		return nil
+	}
+	type raw VolumeMount
+	var r raw
+	if err := unmarshal(&r); err != nil {
+		return fmt.Errorf("volume mount: expected a path or {path, subpath}: %w", err)
+	}
+	*v = VolumeMount(r)
+	return nil
 }
 
 type Build struct {
@@ -80,6 +125,8 @@ type Resources struct {
 type Health struct {
 	Path string `yaml:"path"`
 	Port int    `yaml:"port"`
+	// Command runs an exec probe instead of an HTTP one.
+	Command []string `yaml:"command"`
 }
 
 // GPU accepts either a count (`gpu: 1`) or a mapping
