@@ -6,6 +6,14 @@ All notable changes to JEKYO are documented here. The format follows
 may contain breaking changes and patches never do. From 1.0 on, breaking
 changes only land in major versions.
 
+## [0.15.3] - 2026-08-01
+
+### Added
+
+- Below 90x24 the ui shows a friendly "terminal too small" screen with
+  the current and required size, btop-style, instead of a cramped
+  layout.
+
 ## [0.15.2] - 2026-08-01
 
 ### Fixed

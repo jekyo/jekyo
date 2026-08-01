@@ -210,9 +210,20 @@ func sparkline(vals []int64, width int) string {
 	return b.String()
 }
 
+// minimum size below which the layout stops making sense, btop-style
+const minCols, minRows = 90, 24
+
 func (m *uiModel) View() string {
 	if m.width == 0 {
 		return "loading..."
+	}
+	if m.width < minCols || m.height < minRows {
+		msg := lipgloss.JoinVertical(lipgloss.Center,
+			uiHdrStyle.Render("Terminal too small"),
+			uiDimStyle.Render(fmt.Sprintf("need %dx%d, have %dx%d", minCols, minRows, m.width, m.height)),
+			uiDimStyle.Render("resize the window or zoom out"),
+		)
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, msg)
 	}
 	// first snapshot still loading: show the logomark splash if it fits
 	if len(m.snap.Nodes) == 0 && len(m.rows) == 0 && m.err == "" && m.height >= len(uiSplash)+4 {
