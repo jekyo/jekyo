@@ -1,0 +1,40 @@
+version: 2
+project_name: jekyo
+
+builds:
+  - main: ./cmd/jekyo
+    binary: jekyo
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+
+# Raw binaries (not tarballs) so `curl .../releases/latest/download/jekyo-linux-amd64`
+# works — the pattern the docs and CI recipe use.
+archives:
+  - formats: [binary]
+    name_template: "{{ .ProjectName }}-{{ .Os }}-{{ .Arch }}"
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  use: github
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+
+release:
+  draft: false
+  prerelease: auto
