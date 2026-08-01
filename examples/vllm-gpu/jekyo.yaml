@@ -15,7 +15,7 @@ services:
     volumes:
       hf-cache: /root/.cache/huggingface
     http:
-      domain: llm.jekyo.app
+      domain: llm.jekyo.com
 volumes:
   hf-cache:
     size: 40Gi

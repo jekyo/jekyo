@@ -19,7 +19,7 @@ func newTestStore(t *testing.T) *Store {
 func TestSaveGetListRemove(t *testing.T) {
 	s := newTestStore(t)
 
-	m := Meta{Name: "prod", SSH: "root@1.2.3.4", IP: "1.2.3.4", Domain: "jekyo.app", CreatedAt: time.Now()}
+	m := Meta{Name: "prod", SSH: "root@1.2.3.4", IP: "1.2.3.4", Domain: "jekyo.com", CreatedAt: time.Now()}
 	if err := s.Save(m); err != nil {
 		t.Fatal(err)
 	}
@@ -31,7 +31,7 @@ func TestSaveGetListRemove(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.IP != "1.2.3.4" || got.Domain != "jekyo.app" {
+	if got.IP != "1.2.3.4" || got.Domain != "jekyo.com" {
 		t.Fatalf("roundtrip mismatch: %+v", got)
 	}
 

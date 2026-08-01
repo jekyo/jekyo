@@ -8,7 +8,7 @@ is built to be operated by AI agents. Your DevOps team is
 `/jekyo deploy this`.
 
 ```sh
-curl -fsSL https://jekyo.app/install | sh
+curl -fsSL https://jekyo.com/install | sh
 
 jekyo server install root@1.2.3.4 --ip 1.2.3.4 --storage /storage \
   --domain example.com --acme-email you@example.com

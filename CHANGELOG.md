@@ -47,7 +47,7 @@ migrating a production docker-compose server.
 - External registries: `jekyo registry login` wires pull secrets
   automatically.
 - `jekyo context export`/`import` for CI and second machines.
-- One-line installer script (`curl -fsSL https://jekyo.app/install | sh`).
+- One-line installer script (`curl -fsSL https://jekyo.com/install | sh`).
 - `--internal-domain` install flag for a custom cluster DNS suffix.
 - Agent skill v2: complete DSL and CLI surface plus a docker-compose
   migration guide; `jekyo skill install --global` works in every session.

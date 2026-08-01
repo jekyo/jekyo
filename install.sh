@@ -1,5 +1,5 @@
 #!/bin/sh
-# JEKYO installer — https://jekyo.app
+# JEKYO installer — https://jekyo.com
 # Detects OS/arch, downloads the latest release binary, installs to PATH.
 set -eu
 
