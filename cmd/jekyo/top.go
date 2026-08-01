@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/signal"
 	"sort"
 	"strings"
 	"time"
@@ -44,6 +43,17 @@ type topPod struct {
 	MemLimitBytes int64   `json:"memoryLimitBytes,omitempty"`
 	CPUPct        float64 `json:"cpuPercentOfLimit,omitempty"`
 	MemPct        float64 `json:"memoryPercentOfLimit,omitempty"`
+	// cumulative since pod start; diff two snapshots for rates
+	NetRxBytes int64 `json:"networkRxBytes,omitempty"`
+	NetTxBytes int64 `json:"networkTxBytes,omitempty"`
+}
+
+type topVolume struct {
+	App      string  `json:"app"`
+	Claim    string  `json:"claim"`
+	Used     int64   `json:"usedBytes"`
+	Capacity int64   `json:"capacityBytes"`
+	Pct      float64 `json:"percentUsed"`
 }
 
 type topNode struct {
@@ -54,15 +64,94 @@ type topNode struct {
 	MemBytes      int64   `json:"memoryBytes"`
 	MemCapBytes   int64   `json:"memoryCapacityBytes"`
 	MemPct        float64 `json:"memoryPercent"`
+	DiskUsed      int64   `json:"diskUsedBytes,omitempty"`
+	DiskCap       int64   `json:"diskCapacityBytes,omitempty"`
+	DiskPct       float64 `json:"diskPercent,omitempty"`
+	NetRxBytes    int64   `json:"networkRxBytes,omitempty"` // cumulative
+	NetTxBytes    int64   `json:"networkTxBytes,omitempty"` // cumulative
 	PodCount      int     `json:"pods"`
 	MetricsMissed bool    `json:"metricsUnavailable,omitempty"`
 }
 
 type topSnapshot struct {
-	Context string   `json:"context"`
-	Time    string   `json:"time"`
-	Nodes   []topNode `json:"nodes"`
-	Pods    []topPod  `json:"pods"`
+	Context string      `json:"context"`
+	Time    string      `json:"time"`
+	Nodes   []topNode   `json:"nodes"`
+	Pods    []topPod    `json:"pods"`
+	Volumes []topVolume `json:"volumes,omitempty"`
+	takenAt time.Time
+}
+
+// statsSummary is the subset of the kubelet stats summary API we read
+// (network counters, node filesystem, and per-PVC volume usage).
+type statsSummary struct {
+	Node struct {
+		Network struct {
+			RxBytes    *int64 `json:"rxBytes"`
+			TxBytes    *int64 `json:"txBytes"`
+			Interfaces []struct {
+				Name    string `json:"name"`
+				RxBytes *int64 `json:"rxBytes"`
+				TxBytes *int64 `json:"txBytes"`
+			} `json:"interfaces"`
+		} `json:"network"`
+		Fs struct {
+			UsedBytes     *int64 `json:"usedBytes"`
+			CapacityBytes *int64 `json:"capacityBytes"`
+		} `json:"fs"`
+	} `json:"node"`
+	Pods []struct {
+		PodRef struct {
+			Name      string `json:"name"`
+			Namespace string `json:"namespace"`
+		} `json:"podRef"`
+		Network struct {
+			RxBytes *int64 `json:"rxBytes"`
+			TxBytes *int64 `json:"txBytes"`
+		} `json:"network"`
+		Volume []struct {
+			UsedBytes     *int64 `json:"usedBytes"`
+			CapacityBytes *int64 `json:"capacityBytes"`
+			PVCRef        *struct {
+				Name string `json:"name"`
+			} `json:"pvcRef"`
+		} `json:"volume"`
+	} `json:"pods"`
+}
+
+func deref(p *int64) int64 {
+	if p == nil {
+		return 0
+	}
+	return *p
+}
+
+func pct(used, cap int64) float64 {
+	if cap <= 0 {
+		return 0
+	}
+	return 100 * float64(used) / float64(cap)
+}
+
+// fmtRate renders bytes/sec compactly (12K/s, 3.4M/s).
+func fmtRate(bps float64) string {
+	switch {
+	case bps >= 1<<20:
+		return fmt.Sprintf("%.1fM/s", bps/(1<<20))
+	case bps >= 1<<10:
+		return fmt.Sprintf("%.0fK/s", bps/(1<<10))
+	default:
+		return fmt.Sprintf("%.0fB/s", bps)
+	}
+}
+
+// rate turns two cumulative byte counters into bytes/sec; counters reset
+// when a pod restarts, so negative deltas clamp to zero.
+func rate(prev, cur int64, dt float64) float64 {
+	if dt <= 0 || cur < prev {
+		return 0
+	}
+	return float64(cur-prev) / dt
 }
 
 func gatherTop(ctx context.Context, d *deploy.Deployer, contextName, app string) (*topSnapshot, error) {
@@ -89,7 +178,46 @@ func gatherTop(ctx context.Context, d *deploy.Deployer, contextName, app string)
 		}
 	}
 
-	snap := &topSnapshot{Context: contextName, Time: time.Now().UTC().Format(time.RFC3339)}
+	snap := &topSnapshot{Context: contextName, Time: time.Now().UTC().Format(time.RFC3339), takenAt: time.Now()}
+
+	// kubelet stats summary: network counters, node disk, PVC usage.
+	podNet := map[string][2]int64{}
+	sums := map[string]statsSummary{}
+	if nodeList, err := d.Client.Typed.CoreV1().Nodes().List(ctx, metav1.ListOptions{}); err == nil {
+		for _, n := range nodeList.Items {
+			raw, err := d.Client.Typed.CoreV1().RESTClient().Get().
+				AbsPath("/api/v1/nodes/" + n.Name + "/proxy/stats/summary").DoRaw(ctx)
+			if err != nil {
+				continue
+			}
+			var sum statsSummary
+			if json.Unmarshal(raw, &sum) == nil {
+				sums[n.Name] = sum
+				nodeFsCap := deref(sum.Node.Fs.CapacityBytes)
+				for _, p := range sum.Pods {
+					podNet[p.PodRef.Namespace+"/"+p.PodRef.Name] = [2]int64{deref(p.Network.RxBytes), deref(p.Network.TxBytes)}
+					for _, v := range p.Volume {
+						if v.PVCRef == nil || !strings.HasPrefix(p.PodRef.Namespace, "jekyo-") {
+							continue
+						}
+						capB := deref(v.CapacityBytes)
+						// local-path volumes report the node filesystem, not
+						// their own usage; that row carries no information
+						if nodeFsCap > 0 && capB > nodeFsCap-nodeFsCap/100 && capB < nodeFsCap+nodeFsCap/100 {
+							continue
+						}
+						snap.Volumes = append(snap.Volumes, topVolume{
+							App:      strings.TrimPrefix(p.PodRef.Namespace, "jekyo-"),
+							Claim:    v.PVCRef.Name,
+							Used:     deref(v.UsedBytes),
+							Capacity: capB,
+							Pct:      pct(deref(v.UsedBytes), capB),
+						})
+					}
+				}
+			}
+		}
+	}
 	for _, p := range pods.Items {
 		ready, total, restarts := 0, len(p.Spec.Containers), 0
 		for _, cs := range p.Status.ContainerStatuses {
@@ -114,11 +242,13 @@ func gatherTop(ctx context.Context, d *deploy.Deployer, contextName, app string)
 			}
 		}
 		u := usage[p.Namespace+"/"+p.Name]
+		nets := podNet[p.Namespace+"/"+p.Name]
 		row := topPod{
 			App: p.Labels[compile.LabelApp], Service: p.Labels[compile.LabelService],
 			Pod: p.Name, Ready: fmt.Sprintf("%d/%d", ready, total), Status: status,
 			Restarts: restarts, AgeSec: int64(time.Since(p.CreationTimestamp.Time).Seconds()),
 			CPUMilli: u[0], MemBytes: u[1], CPULimitMilli: limCPU, MemLimitBytes: limMem,
+			NetRxBytes: nets[0], NetTxBytes: nets[1],
 		}
 		if limCPU > 0 {
 			row.CPUPct = 100 * float64(u[0]) / float64(limCPU)
@@ -157,6 +287,23 @@ func gatherTop(ctx context.Context, d *deploy.Deployer, contextName, app string)
 			CPUCapMilli:   n.Status.Allocatable.Cpu().MilliValue(),
 			MemCapBytes:   n.Status.Allocatable.Memory().Value(),
 			MetricsMissed: !metricsOK,
+		}
+		if s, ok := sums[n.Name]; ok {
+			node.DiskUsed = deref(s.Node.Fs.UsedBytes)
+			node.DiskCap = deref(s.Node.Fs.CapacityBytes)
+			node.DiskPct = pct(node.DiskUsed, node.DiskCap)
+			node.NetRxBytes = deref(s.Node.Network.RxBytes)
+			node.NetTxBytes = deref(s.Node.Network.TxBytes)
+			// some kubelets omit the default-interface rollup; use the
+			// busiest interface as the uplink proxy
+			if node.NetRxBytes == 0 && node.NetTxBytes == 0 {
+				for _, iface := range s.Node.Network.Interfaces {
+					if deref(iface.RxBytes) > node.NetRxBytes {
+						node.NetRxBytes = deref(iface.RxBytes)
+						node.NetTxBytes = deref(iface.TxBytes)
+					}
+				}
+			}
 		}
 		if node.CPUCapMilli > 0 {
 			node.CPUPct = 100 * float64(node.CPUMilli) / float64(node.CPUCapMilli)
@@ -244,54 +391,14 @@ func fmtCPU(m int64) string {
 	return fmt.Sprintf("%dm", m)
 }
 
-func renderTop(snap *topSnapshot, interval time.Duration) string {
-	var b strings.Builder
-	b.WriteString("\033[H\033[2J") // home + clear
-	fmt.Fprintf(&b, "\033[1mJEKYO\033[0m  context \033[36m%s\033[0m  %s  (refresh %s, Ctrl+C to quit)\n\n",
-		snap.Context, time.Now().Format("15:04:05"), interval)
-
-	for _, n := range snap.Nodes {
-		if n.MetricsMissed {
-			fmt.Fprintf(&b, "  \033[33mmetrics-server not responding yet; usage shows 0\033[0m\n")
-		}
-		fmt.Fprintf(&b, "  %-12s cpu %s %5.1f%%  (%s/%s)\n", n.Name, bar(n.CPUPct, 24), n.CPUPct, fmtCPU(n.CPUMilli), fmtCPU(n.CPUCapMilli))
-		fmt.Fprintf(&b, "  %-12s mem %s %5.1f%%  (%s/%s)  %d pods\n\n", "", bar(n.MemPct, 24), n.MemPct, fmtMem(n.MemBytes), fmtMem(n.MemCapBytes), n.PodCount)
-	}
-
-	if len(snap.Pods) == 0 {
-		b.WriteString("  No app pods.\n")
-		return b.String()
-	}
-	fmt.Fprintf(&b, "  \033[1m%-14s %-12s %-7s %-16s %4s %8s %9s %-14s %-14s\033[0m\n",
-		"APP", "SERVICE", "READY", "STATUS", "RST", "CPU", "MEM", "CPU/LIMIT", "MEM/LIMIT")
-	for _, p := range snap.Pods {
-		// pad before coloring so ANSI codes don't break column alignment
-		status := fmt.Sprintf("%-16s", p.Status)
-		if p.Status != "Running" {
-			status = "\033[31m" + status + "\033[0m"
-		}
-		cpuBar, memBar := strings.Repeat(" ", 14), strings.Repeat(" ", 14)
-		if p.CPULimitMilli > 0 {
-			cpuBar = bar(p.CPUPct, 8) + fmt.Sprintf(" %3.0f%%", p.CPUPct)
-		}
-		if p.MemLimitBytes > 0 {
-			memBar = bar(p.MemPct, 8) + fmt.Sprintf(" %3.0f%%", p.MemPct)
-		}
-		fmt.Fprintf(&b, "  %-14s %-12s %-7s %s %4d %8s %9s %s %s\n",
-			p.App, p.Service, p.Ready, status, p.Restarts, fmtCPU(p.CPUMilli), fmtMem(p.MemBytes), cpuBar, memBar)
-	}
-	return b.String()
-}
-
 func newTopCmd() *cobra.Command {
-	var jsonOut bool
-	var interval time.Duration
 	cmd := &cobra.Command{
 		Use:   "top [app]",
-		Short: "Live resource dashboard for apps (CPU, memory, restarts)",
-		Long: "Live btop-style view of app pods and node capacity, refreshed in place.\n" +
-			"With --json it prints one machine-readable snapshot and exits, which is\n" +
-			"the form AI agents should use.",
+		Short: "One resource snapshot as JSON (in a terminal, opens jekyo ui)",
+		Long: "Prints one machine-readable snapshot: per-pod CPU, memory, network\n" +
+			"counters and restarts, node capacity, disk, and volume usage. This is\n" +
+			"the form AI agents and scripts should consume. Run interactively in a\n" +
+			"terminal it opens the jekyo ui dashboard instead.",
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := ""
@@ -309,42 +416,20 @@ func newTopCmd() *cobra.Command {
 				}
 			}
 
-			if jsonOut || !term.IsTerminal(int(os.Stdout.Fd())) {
-				ctx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second)
-				defer cancel()
-				snap, err := gatherTop(ctx, d, name, app)
-				if err != nil {
-					return err
-				}
-				enc := json.NewEncoder(cmd.OutOrStdout())
-				enc.SetIndent("", "  ")
-				return enc.Encode(snap)
+			if term.IsTerminal(int(os.Stdout.Fd())) && !cmd.Flags().Changed("json") {
+				return runUI(d, name)
 			}
-
-			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt)
-			defer stop()
-			ticker := time.NewTicker(interval)
-			defer ticker.Stop()
-			for {
-				snap, err := gatherTop(ctx, d, name, app)
-				if err != nil {
-					if ctx.Err() != nil {
-						fmt.Fprint(cmd.OutOrStdout(), "\033[0m\n")
-						return nil
-					}
-					return err
-				}
-				fmt.Fprint(cmd.OutOrStdout(), renderTop(snap, interval))
-				select {
-				case <-ctx.Done():
-					fmt.Fprint(cmd.OutOrStdout(), "\033[0m\n")
-					return nil
-				case <-ticker.C:
-				}
+			ctx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second)
+			defer cancel()
+			snap, err := gatherTop(ctx, d, name, app)
+			if err != nil {
+				return err
 			}
+			enc := json.NewEncoder(cmd.OutOrStdout())
+			enc.SetIndent("", "  ")
+			return enc.Encode(snap)
 		},
 	}
-	cmd.Flags().BoolVar(&jsonOut, "json", false, "print one snapshot as JSON and exit")
-	cmd.Flags().DurationVar(&interval, "interval", 2*time.Second, "refresh interval")
+	cmd.Flags().Bool("json", false, "print the snapshot even in a terminal")
 	return cmd
 }

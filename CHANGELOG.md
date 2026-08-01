@@ -6,6 +6,26 @@ All notable changes to JEKYO are documented here. The format follows
 may contain breaking changes and patches never do. From 1.0 on, breaking
 changes only land in major versions.
 
+## [0.5.0] - 2026-08-01
+
+### Added
+
+- Traffic and disk everywhere: `jekyo ui` grew btop-style server gauges
+  (CPU, memory, disk) with history sparklines, live network rates for
+  the whole server, per-service download/upload sparklines in the
+  metrics tab, and volume usage bars in the status tab.
+- `jekyo top --json` now includes network counters per pod and node,
+  node disk usage, and per-volume usage, all from the kubelet stats
+  API. Diff two snapshots for rates.
+
+### Changed
+
+- `jekyo top` and `jekyo ui` merged into one dashboard: `top` in a
+  terminal opens the UI; piped or with `--json` it prints the snapshot.
+- `jekyo --help` is organized into groups (Apps, Observe, Operate,
+  Servers & access, Agents & tooling) so the everyday commands stand
+  out and plumbing sinks to the bottom.
+
 ## [0.4.0] - 2026-08-01
 
 ### Added

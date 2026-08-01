@@ -46,6 +46,13 @@ type uiRow struct {
 type histPt struct {
 	cpu int64
 	mem int64
+	rx  float64 // bytes/sec
+	tx  float64
+}
+
+type nodeHistPt struct {
+	cpuPct, memPct float64
+	rx, tx         float64 // bytes/sec
 }
 
 const (
@@ -79,8 +86,10 @@ type uiModel struct {
 	logCancel context.CancelFunc
 	logKey    string
 
-	hist   map[string][]histPt
-	events map[string][]string
+	hist     map[string][]histPt
+	nodeHist []nodeHistPt
+	prevSnap *topSnapshot
+	events   map[string][]string
 
 	confirm *confirmState
 	status  string // one-line footer notice
@@ -280,12 +289,29 @@ func (m *uiModel) move(delta int) {
 }
 
 func (m *uiModel) appendHist() {
+	dt := 0.0
+	prevPods := map[string]topPod{}
+	prevNodes := map[string]topNode{}
+	if m.prevSnap != nil {
+		dt = m.snap.takenAt.Sub(m.prevSnap.takenAt).Seconds()
+		for _, p := range m.prevSnap.Pods {
+			prevPods[p.Pod] = p
+		}
+		for _, n := range m.prevSnap.Nodes {
+			prevNodes[n.Name] = n
+		}
+	}
+
 	perSvc := map[string]histPt{}
 	for _, p := range m.snap.Pods {
 		k := p.App + "/" + p.Service
 		pt := perSvc[k]
 		pt.cpu += p.CPUMilli
 		pt.mem += p.MemBytes
+		if pp, ok := prevPods[p.Pod]; ok {
+			pt.rx += rate(pp.NetRxBytes, p.NetRxBytes, dt)
+			pt.tx += rate(pp.NetTxBytes, p.NetTxBytes, dt)
+		}
 		perSvc[k] = pt
 	}
 	for k, pt := range perSvc {
@@ -295,6 +321,26 @@ func (m *uiModel) appendHist() {
 		}
 		m.hist[k] = h
 	}
+
+	// whole-server history for the header sparklines
+	var np nodeHistPt
+	for _, n := range m.snap.Nodes {
+		np.cpuPct += n.CPUPct
+		np.memPct += n.MemPct
+		if pn, ok := prevNodes[n.Name]; ok {
+			np.rx += rate(pn.NetRxBytes, n.NetRxBytes, dt)
+			np.tx += rate(pn.NetTxBytes, n.NetTxBytes, dt)
+		}
+	}
+	if c := len(m.snap.Nodes); c > 1 {
+		np.cpuPct /= float64(c)
+		np.memPct /= float64(c)
+	}
+	m.nodeHist = append(m.nodeHist, np)
+	if len(m.nodeHist) > histBuf {
+		m.nodeHist = m.nodeHist[len(m.nodeHist)-histBuf:]
+	}
+	m.prevSnap = m.snap
 }
 
 func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -433,18 +479,23 @@ func newUICmd() *cobra.Command {
 					name = meta.Name
 				}
 			}
-			m := &uiModel{
-				d: d, ctxName: name,
-				snap:   &topSnapshot{},
-				logs:   map[string][]string{},
-				hist:   map[string][]histPt{},
-				events: map[string][]string{},
-			}
-			p := tea.NewProgram(m, tea.WithAltScreen())
-			_, err = p.Run()
-			return err
+			return runUI(d, name)
 		},
 	}
+}
+
+// runUI starts the dashboard; jekyo top in a terminal lands here too.
+func runUI(d *deploy.Deployer, ctxName string) error {
+	m := &uiModel{
+		d: d, ctxName: ctxName,
+		snap:   &topSnapshot{},
+		logs:   map[string][]string{},
+		hist:   map[string][]histPt{},
+		events: map[string][]string{},
+	}
+	p := tea.NewProgram(m, tea.WithAltScreen())
+	_, err := p.Run()
+	return err
 }
 
 func truncate(s string, n int) string {

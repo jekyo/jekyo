@@ -29,35 +29,30 @@ Start with:
 	root.PersistentFlags().StringVar(&contextFlag, "context", "", "context (server) to operate on; defaults to the current one")
 	root.PersistentFlags().StringVar(&sshKeyFlag, "ssh-key", "", "SSH private key for server access (default: ssh-agent)")
 
-	root.AddCommand(
-		newVersionCmd(),
-		newContextCmd(),
-		newKubectlCmd(),
-		newServerCmd(),
-		newUpCmd(),
-		newDownCmd(),
-		newLsCmd(),
-		newRenderCmd(),
-		newBuildCmd(),
-		newImagesCmd(),
-		newPsCmd(),
-		newLogsCmd(),
-		newExecCmd(),
-		newAttachCmd(),
-		newTopCmd(),
-		newUICmd(),
-		newRestartCmd(),
-		newStatusCmd(),
-		newHistoryCmd(),
-		newRollbackCmd(),
-		newRegistryCmd(),
-		newSkillCmd(),
-		newSchemaCmd(),
-		newTemplatesCmd(),
-		newInitCmd(),
-		newVPNCmd(),
-		newBackupCmd(),
-	)
+	// help output is organized by how often a command is reached for;
+	// rarely-used plumbing sinks to the bottom.
+	groups := map[string][]*cobra.Command{
+		"apps":    {newInitCmd(), newUpCmd(), newDownCmd(), newLsCmd(), newTemplatesCmd()},
+		"observe": {newPsCmd(), newLogsCmd(), newExecCmd(), newAttachCmd(), newUICmd(), newTopCmd(), newStatusCmd()},
+		"operate": {newRestartCmd(), newHistoryCmd(), newRollbackCmd(), newBackupCmd()},
+		"servers": {newServerCmd(), newContextCmd(), newVPNCmd(), newRegistryCmd()},
+		"tooling": {newSkillCmd(), newRenderCmd(), newSchemaCmd(), newBuildCmd(), newImagesCmd(), newKubectlCmd(), newVersionCmd()},
+	}
+	for _, g := range []struct{ id, title string }{
+		{"apps", "Apps:"},
+		{"observe", "Observe:"},
+		{"operate", "Operate:"},
+		{"servers", "Servers & access:"},
+		{"tooling", "Agents & tooling:"},
+	} {
+		root.AddGroup(&cobra.Group{ID: g.id, Title: g.title})
+		for _, c := range groups[g.id] {
+			c.GroupID = g.id
+			root.AddCommand(c)
+		}
+	}
+	root.SetHelpCommandGroupID("tooling")
+	root.SetCompletionCommandGroupID("tooling")
 	return root
 }
 

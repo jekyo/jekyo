@@ -57,7 +57,7 @@ func (m *uiModel) View() string {
 		leftW = m.width / 3
 	}
 	rightW := m.width - leftW - 6
-	bodyH := m.height - 7 // header(2) + tabs(1) + footer(1) + borders
+	bodyH := m.height - 8 // header(3) + tabs(1) + footer(1) + borders
 
 	header := m.viewHeader()
 	left := uiPane.Width(leftW).Height(bodyH).Render(m.viewTree(leftW, bodyH))
@@ -66,14 +66,36 @@ func (m *uiModel) View() string {
 	return header + "\n" + body + "\n" + m.viewFooter()
 }
 
+// viewHeader is the btop-style server strip: gauges for cpu/mem/disk and
+// live network rates, each with a short history sparkline.
 func (m *uiModel) viewHeader() string {
 	title := uiHdrStyle.Render("JEKYO") + uiDimStyle.Render("  context ") + m.ctxName
-	var gauges string
-	for _, n := range m.snap.Nodes {
-		gauges += fmt.Sprintf("  cpu %s %4.1f%%  mem %s %4.1f%%  %d pods",
-			bar(n.CPUPct, 16), n.CPUPct, bar(n.MemPct, 16), n.MemPct, n.PodCount)
+	if len(m.snap.Nodes) == 0 {
+		return title + "\n"
 	}
-	return title + gauges
+	n := m.snap.Nodes[0]
+	var cpus, mems, rxs, txs []int64
+	var curRx, curTx float64
+	for _, h := range m.nodeHist {
+		cpus = append(cpus, int64(h.cpuPct*100))
+		mems = append(mems, int64(h.memPct*100))
+		rxs = append(rxs, int64(h.rx))
+		txs = append(txs, int64(h.tx))
+	}
+	if len(m.nodeHist) > 0 {
+		curRx, curTx = m.nodeHist[len(m.nodeHist)-1].rx, m.nodeHist[len(m.nodeHist)-1].tx
+	}
+	sw := 18
+	amber := lipgloss.NewStyle().Foreground(uiAmber)
+	green := lipgloss.NewStyle().Foreground(uiGood)
+	line2 := fmt.Sprintf("  cpu %s %5.1f%% %s   mem %s %5.1f%% %s",
+		bar(n.CPUPct, 14), n.CPUPct, amber.Render(sparkline(cpus, sw)),
+		bar(n.MemPct, 14), n.MemPct, green.Render(sparkline(mems, sw)))
+	line3 := fmt.Sprintf("  dsk %s %5.1f%%  (%s/%s)   net ↓ %-8s %s ↑ %-8s %s",
+		bar(n.DiskPct, 14), n.DiskPct, fmtMem(n.DiskUsed), fmtMem(n.DiskCap),
+		fmtRate(curRx), amber.Render(sparkline(rxs, 12)),
+		fmtRate(curTx), green.Render(sparkline(txs, 12)))
+	return title + uiDimStyle.Render(fmt.Sprintf("   %s · %d pods", n.Name, n.PodCount)) + "\n" + line2 + "\n" + line3
 }
 
 func (m *uiModel) viewTree(w, h int) string {
@@ -162,6 +184,20 @@ func (m *uiModel) viewRight(w, h int) string {
 			b.WriteString(fmt.Sprintf("%-14s %-6s %-16s restarts %d  cpu %s  mem %s\n",
 				p.Service, p.Ready, p.Status, p.Restarts, fmtCPU(p.CPUMilli), fmtMem(p.MemBytes)))
 		}
+		seen := map[string]bool{}
+		wroteVolHdr := false
+		for _, v := range m.snap.Volumes {
+			if v.App != app || seen[v.Claim] || v.Capacity == 0 {
+				continue
+			}
+			seen[v.Claim] = true
+			if !wroteVolHdr {
+				b.WriteString("\n" + uiHdrStyle.Render("Volumes") + "\n")
+				wroteVolHdr = true
+			}
+			b.WriteString(fmt.Sprintf("%-24s %s %5.1f%%  (%s/%s)\n",
+				truncate(v.Claim, 24), bar(v.Pct, 16), v.Pct, fmtMem(v.Used), fmtMem(v.Capacity)))
+		}
 		b.WriteString("\n" + uiHdrStyle.Render("Recent events") + "\n")
 		for _, e := range m.events[app] {
 			b.WriteString(truncate(e, w-2) + "\n")
@@ -193,11 +229,27 @@ func (m *uiModel) viewMetrics(key string, w int) string {
 	if sw > 100 {
 		sw = 100
 	}
+	rxs := make([]int64, len(h))
+	txs := make([]int64, len(h))
+	var maxRx, maxTx float64
+	for i, pt := range h {
+		rxs[i], txs[i] = int64(pt.rx), int64(pt.tx)
+		if pt.rx > maxRx {
+			maxRx = pt.rx
+		}
+		if pt.tx > maxTx {
+			maxTx = pt.tx
+		}
+	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "cpu  now %-8s peak %-8s (window %ds)\n", fmtCPU(cur.cpu), fmtCPU(maxC), len(h)*2)
 	b.WriteString(lipgloss.NewStyle().Foreground(uiAmber).Render(sparkline(cpus, sw)) + "\n\n")
 	fmt.Fprintf(&b, "mem  now %-8s peak %-8s\n", fmtMem(cur.mem), fmtMem(maxM))
-	b.WriteString(lipgloss.NewStyle().Foreground(uiGood).Render(sparkline(mems, sw)) + "\n")
+	b.WriteString(lipgloss.NewStyle().Foreground(uiGood).Render(sparkline(mems, sw)) + "\n\n")
+	fmt.Fprintf(&b, "net  ↓ now %-9s peak %-9s\n", fmtRate(cur.rx), fmtRate(maxRx))
+	b.WriteString(lipgloss.NewStyle().Foreground(uiAmber).Render(sparkline(rxs, sw)) + "\n")
+	fmt.Fprintf(&b, "net  ↑ now %-9s peak %-9s\n", fmtRate(cur.tx), fmtRate(maxTx))
+	b.WriteString(lipgloss.NewStyle().Foreground(uiGood).Render(sparkline(txs, sw)) + "\n")
 	return b.String()
 }
 
