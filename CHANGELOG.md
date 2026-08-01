@@ -6,6 +6,13 @@ All notable changes to JEKYO are documented here. The format follows
 may contain breaking changes and patches never do. From 1.0 on, breaking
 changes only land in major versions.
 
+## [0.11.1] - 2026-08-01
+
+### Fixed
+
+- Breathing room between every box in `jekyo ui`: header columns, the
+  metrics strip, and the sidebar no longer share flush borders.
+
 ## [0.11.0] - 2026-08-01
 
 ### Added

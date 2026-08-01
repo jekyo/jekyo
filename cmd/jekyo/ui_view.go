@@ -219,12 +219,12 @@ func (m *uiModel) View() string {
 	if m.width < 90 {
 		leftW = m.width / 3
 	}
-	rightW := m.width - leftW - 6
+	rightW := m.width - leftW - 7
 	header := m.viewHeader()
 	bodyH := m.height - lipgloss.Height(header) - 3
 	left := uiPane.Width(leftW).Height(bodyH).Render(m.viewTree(leftW, bodyH))
 	right := uiPane.Width(rightW).Height(bodyH).Render(m.viewRight(rightW-2, bodyH))
-	body := lipgloss.JoinHorizontal(lipgloss.Top, left, right)
+	body := lipgloss.JoinHorizontal(lipgloss.Top, left, " ", right)
 	return header + "\n" + body + "\n" + m.viewFooter()
 }
 
@@ -302,9 +302,9 @@ func (m *uiModel) viewHeader() string {
 	cpuBox := boxWithTitle(btopTitle("¹", "cpu")+uiDimStyle.Render("─· ")+identity+" ", right, cpuRows, w)
 
 	// bottom row: mem, disks, net side by side
-	memW := w * 30 / 100
-	netW := w * 34 / 100
-	dskW := w - memW - netW
+	memW := (w - 2) * 30 / 100
+	netW := (w - 2) * 34 / 100
+	dskW := w - 2 - memW - netW
 	var memRows []string
 	if m.mem.total > 0 {
 		mr := func(label string, v int64, calm bool) string {
@@ -387,7 +387,7 @@ func (m *uiModel) viewHeader() string {
 	dskBox := boxWithTitle(btopTitle("³", "disks"), ioTitle, dskRows, dskW)
 	netCol := boxWithTitle(btopTitle("⁴", "net"), "", netRows, netW) + "\n" +
 		boxWithTitle(btopTitle("⁵", "gpu"), "", gpuRows, netW)
-	return cpuBox + "\n" + lipgloss.JoinHorizontal(lipgloss.Top, memBox, dskBox, netCol)
+	return cpuBox + "\n" + lipgloss.JoinHorizontal(lipgloss.Top, memBox, " ", dskBox, " ", netCol)
 }
 
 // btopTitle renders a border-fused box label like btop's ¹cpu.
@@ -524,7 +524,7 @@ func (m *uiModel) viewRight(w, h int) string {
 // service: cpu, mem, and traffic boxes with braille history.
 func (m *uiModel) viewMetricStrip(key string, w int) string {
 	h := m.hist[key]
-	boxW := (w - 2) / 3
+	boxW := (w - 4) / 3
 	if len(h) == 0 {
 		return boxWithTitle(btopTitle("∿", " collecting"), "", []string{uiDimStyle.Render("sampling " + key + "...")}, w-2)
 	}
@@ -565,9 +565,9 @@ func (m *uiModel) viewMetricStrip(key string, w int) string {
 	}
 	_ = txs
 	return lipgloss.JoinHorizontal(lipgloss.Top,
-		boxWithTitle(btopTitle("", m.ic("cpu")+" cpu"), "", cpuRows, boxW),
-		boxWithTitle(btopTitle("", m.ic("mem")+" mem"), "", memRows, boxW),
-		boxWithTitle(btopTitle("", m.ic("net")+" net"), "", netRows, w-2-2*boxW),
+		boxWithTitle(btopTitle("", m.ic("cpu")+" cpu"), "", cpuRows, boxW), " ",
+		boxWithTitle(btopTitle("", m.ic("mem")+" mem"), "", memRows, boxW), " ",
+		boxWithTitle(btopTitle("", m.ic("net")+" net"), "", netRows, w-4-2*boxW),
 	)
 }
 
