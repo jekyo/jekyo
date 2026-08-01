@@ -6,6 +6,14 @@ All notable changes to JEKYO are documented here. The format follows
 may contain breaking changes and patches never do. From 1.0 on, breaking
 changes only land in major versions.
 
+## [0.16.1] - 2026-08-01
+
+### Fixed
+
+- `jekyo down` on an app without volumes removes it completely instead
+  of leaving a ghost entry in `jekyo ls`; the closing message now says
+  whether volumes were actually kept.
+
 ## [0.16.0] - 2026-08-01
 
 ### Added

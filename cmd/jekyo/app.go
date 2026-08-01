@@ -174,13 +174,17 @@ func newDownCmd() *cobra.Command {
 			}
 			ctx, cancel := context.WithTimeout(cmd.Context(), deployTimeout)
 			defer cancel()
-			if err := d.Down(ctx, name, withVolumes); err != nil {
+			volumesKept, err := d.Down(ctx, name, withVolumes)
+			if err != nil {
 				return err
 			}
-			if withVolumes {
+			switch {
+			case withVolumes:
 				cmd.Println("App removed, volumes deleted:", name)
-			} else {
+			case volumesKept:
 				cmd.Println("App removed (volumes kept; 'jekyo down", name, "--volumes' deletes them)")
+			default:
+				cmd.Println("App removed:", name)
 			}
 			return nil
 		},

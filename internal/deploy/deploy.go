@@ -219,17 +219,30 @@ func (d *Deployer) List(ctx context.Context) ([]AppInfo, error) {
 	return out, nil
 }
 
-// Down removes an app's workloads. Volumes (PVCs) and the namespace survive
-// unless withVolumes is set, in which case the whole namespace goes.
-func (d *Deployer) Down(ctx context.Context, appName string, withVolumes bool) error {
+// Down removes an app's workloads. Volumes survive unless withVolumes;
+// the returned flag reports whether any were actually kept.
+func (d *Deployer) Down(ctx context.Context, appName string, withVolumes bool) (volumesKept bool, _ error) {
+	ns := compile.NamespaceFor(appName)
 	if withVolumes {
-		err := d.Client.Typed.CoreV1().Namespaces().Delete(ctx, compile.NamespaceFor(appName), metav1.DeleteOptions{})
+		err := d.Client.Typed.CoreV1().Namespaces().Delete(ctx, ns, metav1.DeleteOptions{})
 		if errors.IsNotFound(err) {
-			return fmt.Errorf("app %q is not deployed", appName)
+			return false, fmt.Errorf("app %q is not deployed", appName)
 		}
-		return err
+		return false, err
 	}
-	return d.prune(ctx, appName, map[string]bool{})
+	if err := d.prune(ctx, appName, map[string]bool{}); err != nil {
+		return false, err
+	}
+	// the namespace only exists to protect volumes; an app without any has
+	// nothing to keep, so a plain down removes it entirely
+	pvcs, err := d.Client.Typed.CoreV1().PersistentVolumeClaims(ns).List(ctx, metav1.ListOptions{})
+	if err == nil && len(pvcs.Items) == 0 {
+		if err := d.Client.Typed.CoreV1().Namespaces().Delete(ctx, ns, metav1.DeleteOptions{}); err != nil && !errors.IsNotFound(err) {
+			return false, err
+		}
+		return false, nil
+	}
+	return true, nil
 }
 
 func isReady(p corev1.Pod) bool {
