@@ -6,6 +6,19 @@ All notable changes to JEKYO are documented here. The format follows
 may contain breaking changes and patches never do. From 1.0 on, breaking
 changes only land in major versions.
 
+## [0.8.0] - 2026-08-01
+
+### Added
+
+- Full btop-style server header in `jekyo ui`: every CPU core with its
+  own gauge in an adaptive grid, package temperature, load average,
+  memory with absolutes, each real filesystem with its own usage bar,
+  and network rates. Read over SSH from /proc, no agent on the server.
+
+### Changed
+
+- Tab labels are clean again; the footer legend carries every hotkey.
+
 ## [0.7.0] - 2026-08-01
 
 ### Added

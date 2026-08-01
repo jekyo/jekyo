@@ -28,6 +28,14 @@ type snapMsg struct {
 	snap   *topSnapshot
 	load   string // "3.89 4.14 4.49" or empty
 	uptime string // "12d" or empty
+	cores  []float64  // per-core utilization 0-100
+	mounts []mountRow // real filesystems with usage
+	tempC  int        // package temperature, 0 = unknown
+}
+
+type mountRow struct {
+	target     string
+	size, used int64
 }
 type snapErrMsg struct{ err error }
 type tickMsg struct{}
@@ -99,8 +107,12 @@ type uiModel struct {
 	prevSnap *topSnapshot
 	events   map[string][]string
 
-	load   string
-	uptime string
+	load     string
+	uptime   string
+	cores    []float64
+	mounts   []mountRow
+	tempC    int
+	prevStat map[int][2]uint64 // per-core total/idle counters
 
 	confirm *confirmState
 	status  string // one-line footer notice
@@ -119,26 +131,59 @@ func (m *uiModel) gatherCmd() tea.Cmd {
 		}
 		msg := snapMsg{snap: snap}
 		if m.sshc != nil {
-			if out, err := m.sshc.Run("cat /proc/loadavg /proc/uptime 2>/dev/null"); err == nil {
-				lines := strings.Split(strings.TrimSpace(out), "\n")
-				if len(lines) > 0 {
-					if f := strings.Fields(lines[0]); len(f) >= 3 {
-						msg.load = f[0] + " " + f[1] + " " + f[2]
+			out, err := m.sshc.Run(
+				"cat /proc/loadavg /proc/uptime 2>/dev/null; echo @@@; cat /proc/stat; echo @@@; " +
+					"df -B1 -x tmpfs -x devtmpfs -x overlay --output=target,size,used 2>/dev/null | tail -n +2; echo @@@; " +
+					"cat /sys/class/hwmon/hwmon*/temp1_input 2>/dev/null | sort -rn | head -1")
+			if err == nil {
+				parts := strings.Split(out, "@@@")
+				if len(parts) > 0 {
+					lines := strings.Split(strings.TrimSpace(parts[0]), "\n")
+					if len(lines) > 0 {
+						if f := strings.Fields(lines[0]); len(f) >= 3 {
+							msg.load = f[0] + " " + f[1] + " " + f[2]
+						}
+					}
+					if len(lines) > 1 {
+						if f := strings.Fields(lines[1]); len(f) > 0 {
+							var secs float64
+							fmt.Sscanf(f[0], "%f", &secs)
+							d := time.Duration(secs) * time.Second
+							switch {
+							case d >= 48*time.Hour:
+								msg.uptime = fmt.Sprintf("%dd", int(d.Hours()/24))
+							case d >= 2*time.Hour:
+								msg.uptime = fmt.Sprintf("%dh", int(d.Hours()))
+							default:
+								msg.uptime = fmt.Sprintf("%dm", int(d.Minutes()))
+							}
+						}
 					}
 				}
-				if len(lines) > 1 {
-					if f := strings.Fields(lines[1]); len(f) > 0 {
-						var secs float64
-						fmt.Sscanf(f[0], "%f", &secs)
-						d := time.Duration(secs) * time.Second
-						switch {
-						case d >= 48*time.Hour:
-							msg.uptime = fmt.Sprintf("%dd", int(d.Hours()/24))
-						case d >= 2*time.Hour:
-							msg.uptime = fmt.Sprintf("%dh", int(d.Hours()))
-						default:
-							msg.uptime = fmt.Sprintf("%dm", int(d.Minutes()))
+				if len(parts) > 1 {
+					msg.cores = m.perCore(parts[1])
+				}
+				if len(parts) > 2 {
+					for _, l := range strings.Split(strings.TrimSpace(parts[2]), "\n") {
+						f := strings.Fields(l)
+						if len(f) != 3 {
+							continue
 						}
+						var size, used int64
+						fmt.Sscanf(f[1], "%d", &size)
+						fmt.Sscanf(f[2], "%d", &used)
+						// only real filesystems worth showing
+						if size < 1<<30 || strings.Contains(f[0], "efivars") {
+							continue
+						}
+						msg.mounts = append(msg.mounts, mountRow{target: f[0], size: size, used: used})
+					}
+				}
+				if len(parts) > 3 {
+					var milli int
+					fmt.Sscanf(strings.TrimSpace(parts[3]), "%d", &milli)
+					if milli > 1000 {
+						msg.tempC = milli / 1000
 					}
 				}
 			}
@@ -251,6 +296,46 @@ func execSelf(args ...string) tea.Cmd {
 		}
 		return actionMsg{""}
 	})
+}
+
+// perCore turns /proc/stat cpuN counters into utilization percentages
+// using the previous sample's counters.
+func (m *uiModel) perCore(stat string) []float64 {
+	if m.prevStat == nil {
+		m.prevStat = map[int][2]uint64{}
+	}
+	var out []float64
+	for _, l := range strings.Split(stat, "\n") {
+		if !strings.HasPrefix(l, "cpu") || len(l) < 4 || l[3] == ' ' {
+			continue
+		}
+		f := strings.Fields(l)
+		var n int
+		if _, err := fmt.Sscanf(f[0], "cpu%d", &n); err != nil {
+			continue
+		}
+		var total, idle uint64
+		for i, v := range f[1:] {
+			var x uint64
+			fmt.Sscanf(v, "%d", &x)
+			total += x
+			if i == 3 || i == 4 { // idle + iowait
+				idle += x
+			}
+		}
+		prev := m.prevStat[n]
+		dTotal, dIdle := total-prev[0], idle-prev[1]
+		pct := 0.0
+		if prev[0] > 0 && dTotal > 0 {
+			pct = 100 * float64(dTotal-dIdle) / float64(dTotal)
+		}
+		m.prevStat[n] = [2]uint64{total, idle}
+		for len(out) <= n {
+			out = append(out, 0)
+		}
+		out[n] = pct
+	}
+	return out
 }
 
 // ---- model ----
@@ -396,6 +481,15 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if msg.uptime != "" {
 			m.uptime = msg.uptime
+		}
+		if len(msg.cores) > 0 {
+			m.cores = msg.cores
+		}
+		if len(msg.mounts) > 0 {
+			m.mounts = msg.mounts
+		}
+		if msg.tempC > 0 {
+			m.tempC = msg.tempC
 		}
 		m.err = ""
 		m.rebuildRows()

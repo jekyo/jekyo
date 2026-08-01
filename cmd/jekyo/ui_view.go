@@ -158,10 +158,8 @@ func (m *uiModel) View() string {
 		leftW = m.width / 3
 	}
 	rightW := m.width - leftW - 6
-	headerH := 4 // 2 content rows + border
-	bodyH := m.height - headerH - 3
-
 	header := m.viewHeader()
+	bodyH := m.height - lipgloss.Height(header) - 3
 	left := uiPane.Width(leftW).Height(bodyH).Render(m.viewTree(leftW, bodyH))
 	right := uiPane.Width(rightW).Height(bodyH).Render(m.viewRight(rightW-2, bodyH))
 	body := lipgloss.JoinHorizontal(lipgloss.Top, left, right)
@@ -200,26 +198,72 @@ func (m *uiModel) viewHeader() string {
 			curRx, curTx = m.nodeHist[len(m.nodeHist)-1].rx, m.nodeHist[len(m.nodeHist)-1].tx
 		}
 		gap := "    "
-		load := ""
+
+		// summary: total cpu, temperature, load
+		row := fmt.Sprintf("%s %s %5.1f%% %s",
+			uiDimStyle.Render("cpu"), bar(n.CPUPct, 14), n.CPUPct, uiAccent.Render(sparkline(cpus, 14)))
+		if m.tempC > 0 {
+			row += gap + uiDimStyle.Render("temp ") + fmt.Sprintf("%d°C", m.tempC)
+		}
 		if m.load != "" {
-			load = gap + uiDimStyle.Render("load ") + m.load
+			row += gap + uiDimStyle.Render("load ") + m.load
 		}
-		row1 := fmt.Sprintf("%s %s %5.1f%% %s%s%s %s %5.1f%% %-15s %s%s",
-			uiDimStyle.Render("cpu"), bar(n.CPUPct, 12), n.CPUPct, uiAccent.Render(sparkline(cpus, 12)),
-			gap,
-			uiDimStyle.Render("mem"), bar(n.MemPct, 12), n.MemPct,
-			uiDimStyle.Render(fmt.Sprintf("(%s/%s)", fmtMem(n.MemBytes), fmtMem(n.MemCapBytes))),
-			uiGreen.Render(sparkline(mems, 12)), load)
-		row2 := fmt.Sprintf("%s %s %5.1f%% %-15s%s%s ↓ %-8s %s  ↑ %-8s %s",
-			uiDimStyle.Render("dsk"), bar(n.DiskPct, 12), n.DiskPct,
-			uiDimStyle.Render(fmt.Sprintf("(%s/%s)", fmtMem(n.DiskUsed), fmtMem(n.DiskCap))),
-			gap,
-			uiDimStyle.Render("net"), fmtRate(curRx), uiAccent.Render(sparkline(rxs, 10)),
-			fmtRate(curTx), uiGreen.Render(sparkline(txs, 10)))
 		if n.MetricsMissed {
-			row1 += "  " + uiRed.Render(m.ic("warn")+" metrics warming up")
+			row += "  " + uiRed.Render(m.ic("warn")+" metrics warming up")
 		}
-		rows = []string{row1, row2}
+		rows = append(rows, row)
+
+		// per-core grid, btop-style columns sized to the width
+		if len(m.cores) > 1 {
+			cell := 16 // "C31 ▕██░░░░▏ 99%"
+			ncols := (w - 4) / cell
+			if ncols < 1 {
+				ncols = 1
+			}
+			if ncols > 8 {
+				ncols = 8
+			}
+			nrows := (len(m.cores) + ncols - 1) / ncols
+			for r := 0; r < nrows; r++ {
+				var line strings.Builder
+				for c := 0; c < ncols; c++ {
+					i := c*nrows + r
+					if i >= len(m.cores) {
+						continue
+					}
+					line.WriteString(fmt.Sprintf("%s %s %3.0f%%  ",
+						uiDimStyle.Render(fmt.Sprintf("C%-2d", i)), bar(m.cores[i], 6), m.cores[i]))
+				}
+				rows = append(rows, strings.TrimRight(line.String(), " "))
+			}
+		}
+
+		// memory
+		rows = append(rows, fmt.Sprintf("%s %s %5.1f%% %-17s %s",
+			uiDimStyle.Render("mem"), bar(n.MemPct, 14), n.MemPct,
+			uiDimStyle.Render(fmt.Sprintf("(%s/%s)", fmtMem(n.MemBytes), fmtMem(n.MemCapBytes))),
+			uiGreen.Render(sparkline(mems, 14))))
+
+		// real filesystems, each with its own gauge
+		if len(m.mounts) > 0 {
+			var line strings.Builder
+			for _, mt := range m.mounts {
+				p := pct(mt.used, mt.size)
+				line.WriteString(fmt.Sprintf("%s %s %3.0f%% %s%s",
+					uiDimStyle.Render(fmt.Sprintf("%-9s", truncate(mt.target, 9))), bar(p, 8), p,
+					uiDimStyle.Render(fmt.Sprintf("(%s/%s)", fmtMem(mt.used), fmtMem(mt.size))), gap))
+			}
+			rows = append(rows, uiDimStyle.Render("dsk ")+strings.TrimRight(line.String(), " "))
+		} else {
+			rows = append(rows, fmt.Sprintf("%s %s %5.1f%% %s",
+				uiDimStyle.Render("dsk"), bar(n.DiskPct, 14), n.DiskPct,
+				uiDimStyle.Render(fmt.Sprintf("(%s/%s)", fmtMem(n.DiskUsed), fmtMem(n.DiskCap)))))
+		}
+
+		// network
+		rows = append(rows, fmt.Sprintf("%s ↓ %-8s %s  ↑ %-8s %s",
+			uiDimStyle.Render("net"), fmtRate(curRx), uiAccent.Render(sparkline(rxs, 14)),
+			fmtRate(curTx), uiGreen.Render(sparkline(txs, 14))))
 	}
 	return boxWithTitle(uiHdrStyle.Render(title), rows, w)
 }
@@ -313,11 +357,11 @@ func (m *uiModel) viewRight(w, h int) string {
 	}
 	var tb []string
 	for _, t := range tabs {
+		_ = t.key
 		if t.id == m.tab {
 			tb = append(tb, uiTabOn.Render(t.icon+" "+t.label))
 		} else {
-			// show the key on inactive tabs so the jump is discoverable
-			tb = append(tb, uiTabOff.Render(t.icon+" "+t.label+" ")+uiKey.Render(t.key))
+			tb = append(tb, uiTabOff.Render(t.icon+" "+t.label))
 		}
 	}
 	title := lipgloss.JoinHorizontal(lipgloss.Bottom, tb...)
@@ -438,7 +482,7 @@ func (m *uiModel) viewFooter() string {
 			Padding(0, 1).Render(m.confirm.prompt)
 	}
 	keys := []struct{ k, label string }{
-		{"j/k", "move"},
+		{"j/k", "move"}, {"l", "logs"}, {"m", "metrics"}, {"s", "status"},
 		{"r", "restart"}, {"b", "rollback"}, {"e", "exec"}, {"a", "attach"}, {"q", "quit"},
 	}
 	parts := make([]string, len(keys))
