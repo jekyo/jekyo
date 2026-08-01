@@ -72,9 +72,11 @@ re-run to converge/repair a cluster.
      --kubelet-arg=allowed-unsafe-sysctls=net.*     # wg-easy needs sysctls
    ```
 
-   Cluster domain stays `cluster.local` (the old `--cluster-domain
-   jekyo.internal` breaks assumptions in third-party charts; internal DNS
-   convenience comes from the VPN pushing CoreDNS instead).
+   The cluster DNS suffix defaults to `cluster.local` and is configurable
+   via `--internal-domain` (e.g. `jekyo.internal` for pleasant VPN
+   hostnames). The default remains the safe choice when hand-deploying
+   third-party manifests, some of which hardcode cluster.local; JEKYO's
+   own manifests never do.
 3. **GPU (auto-detected, or `--no-gpu`)** — if `lspci` shows NVIDIA: install
    ubuntu-drivers (or accept preinstalled), install `nvidia-container-toolkit`
    from NVIDIA's apt repo, restart k3s (it auto-detects the runtime and wires
