@@ -232,7 +232,9 @@ func (m *uiModel) viewTree(w, h int) string {
 	}
 	inner := w - 2
 	var b strings.Builder
-	lines := 0
+	// column header aligned with the row layout below
+	b.WriteString(uiDimStyle.Render(fmt.Sprintf("    %-14s %6s %7s", "SERVICE", "CPU", "MEM")) + "\n")
+	lines := 1
 	for i, r := range m.rows {
 		if lines >= h-1 {
 			break

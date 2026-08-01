@@ -6,6 +6,13 @@ All notable changes to JEKYO are documented here. The format follows
 may contain breaking changes and patches never do. From 1.0 on, breaking
 changes only land in major versions.
 
+## [0.6.3] - 2026-08-01
+
+### Fixed
+
+- Sidebar columns are labeled (SERVICE, CPU, MEM) so the numbers read
+  at a glance.
+
 ## [0.6.2] - 2026-08-01
 
 ### Added
