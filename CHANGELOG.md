@@ -6,6 +6,17 @@ All notable changes to JEKYO are documented here. The format follows
 may contain breaking changes and patches never do. From 1.0 on, breaking
 changes only land in major versions.
 
+## [0.18.0] - 2026-08-01
+
+### Added
+
+- Local backup target: `jekyo backup config --local` stores restic
+  repositories on the server at /var/lib/jekyo/backups, no S3 account
+  needed. Mount a dedicated disk there for real durability; snapshots,
+  ls, and restore work identically.
+- Rolling back from `jekyo ui` opens a revision picker: every recorded
+  revision with its age, not just the previous one. Enter confirms.
+
 ## [0.17.0] - 2026-08-01
 
 ### Added

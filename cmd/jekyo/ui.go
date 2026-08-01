@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -74,6 +75,17 @@ type eventsMsg struct {
 	lines []string
 }
 type actionMsg struct{ text string }
+
+type releasesMsg struct {
+	app  string
+	revs []deploy.Release // newest first
+}
+
+type pickerState struct {
+	app  string
+	revs []deploy.Release // newest first; index 0 is the current revision
+	idx  int
+}
 type latestMsg struct{ tag string }
 
 // uiRow is one line of the left pane tree.
@@ -153,6 +165,7 @@ type uiModel struct {
 	prevDiskAt time.Time
 	prevStat   map[int][2]uint64 // per-core total/idle counters
 
+	picker  *pickerState
 	confirm *confirmState
 	status  string // one-line footer notice
 	err     string
@@ -397,6 +410,24 @@ func (m *uiModel) eventsCmd(app string) tea.Cmd {
 			lines = []string{"No recent events."}
 		}
 		return eventsMsg{app, lines}
+	}
+}
+
+// releasesCmd loads an app's revision history for the rollback picker.
+func (m *uiModel) releasesCmd(app string) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		revs, err := m.d.Releases(ctx, app)
+		if err != nil {
+			return actionMsg{"releases: " + err.Error()}
+		}
+		// newest first for the picker
+		out := make([]deploy.Release, 0, len(revs))
+		for i := len(revs) - 1; i >= 0; i-- {
+			out = append(out, revs[i])
+		}
+		return releasesMsg{app: app, revs: out}
 	}
 }
 
@@ -682,11 +713,42 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.latest = msg.tag
 		return m, nil
 
+	case releasesMsg:
+		if len(msg.revs) < 2 {
+			m.status = "no previous revisions for " + msg.app
+			return m, nil
+		}
+		m.picker = &pickerState{app: msg.app, revs: msg.revs, idx: 1}
+		return m, nil
+
 	case actionMsg:
 		m.status = msg.text
 		return m, m.gatherCmd()
 
 	case tea.KeyMsg:
+		if m.picker != nil {
+			pk := m.picker
+			switch msg.String() {
+			case "j", "down":
+				if pk.idx < len(pk.revs)-1 {
+					pk.idx++
+				}
+			case "k", "up":
+				if pk.idx > 0 {
+					pk.idx--
+				}
+			case "enter":
+				rev := pk.revs[pk.idx]
+				m.picker = nil
+				m.confirm = &confirmState{
+					prompt: fmt.Sprintf("Roll back %s to revision %d? (y/n)", pk.app, rev.Revision),
+					action: execSelf("rollback", pk.app, strconv.Itoa(rev.Revision)),
+				}
+			case "esc", "q", "b":
+				m.picker = nil
+			}
+			return m, nil
+		}
 		if m.confirm != nil {
 			c := m.confirm
 			m.confirm = nil
@@ -731,11 +793,10 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "b":
 			if app, _, ok := m.selected(); ok {
-				m.confirm = &confirmState{
-					prompt: fmt.Sprintf("Rollback app %s to the previous revision? (y/n)", app),
-					action: execSelf("rollback", app),
-				}
+				m.status = "loading revisions for " + app
+				return m, m.releasesCmd(app)
 			}
+
 		case "e":
 			if app, svc, ok := m.selected(); ok {
 				return m, execSelf("exec", app+"/"+svc)

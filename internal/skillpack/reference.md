@@ -86,7 +86,9 @@ inputs:                 # TEMPLATES ONLY; resolved and stripped by jekyo init
   with a domain.
 - Built images are tagged by content hash: `jekyo up` skips unchanged builds.
 - Backups need a one-time cluster target: `jekyo backup config --endpoint
-  ... --bucket ... --access-key ... --secret-key ...`. Then
+  ... --bucket ... --access-key ... --secret-key ...` for S3-compatible
+  storage, or `jekyo backup config --local` to store repositories on the
+  server at /var/lib/jekyo/backups (mount a dedicated disk there). Then
   `jekyo backup now|ls|restore <app>/<volume>`. Restore stops the app,
   replaces the volume, and restarts it.
 - External private registry images need `jekyo registry login <host>` once

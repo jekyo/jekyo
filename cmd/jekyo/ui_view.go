@@ -227,6 +227,10 @@ func (m *uiModel) View() string {
 	rightW := m.width - leftW - 7
 	header := m.viewHeader()
 	bodyH := m.height - lipgloss.Height(header) - 3
+	if m.picker != nil {
+		modal := lipgloss.Place(m.width, bodyH+2, lipgloss.Center, lipgloss.Center, m.viewPicker())
+		return header + "\n" + modal + "\n" + m.viewFooter()
+	}
 	left := uiPane.Width(leftW).Height(bodyH).Render(m.viewTree(leftW, bodyH))
 	right := uiPane.Width(rightW).Height(bodyH).Render(m.viewRight(rightW-2, bodyH))
 	body := lipgloss.JoinHorizontal(lipgloss.Top, left, " ", right)
@@ -778,3 +782,27 @@ func (m *uiModel) viewFooter() string {
 
 // truncateStr is truncate with a different name kept for box labels.
 func truncateStr(s string, n int) string { return truncate(s, n) }
+
+// viewPicker is the rollback revision chooser: newest first, the current
+// revision marked, enter confirms.
+func (m *uiModel) viewPicker() string {
+	pk := m.picker
+	var rows []string
+	for i, r := range pk.revs {
+		age := age(r.DeployedAt)
+		line := fmt.Sprintf(" v%-3d %-10s ", r.Revision, age+" ago")
+		if i == 0 {
+			line += uiGreen.Render("current ")
+		} else {
+			line += "        "
+		}
+		if i == pk.idx {
+			line = uiKey.Render("❯") + uiSelStyle.Render(line)
+		} else {
+			line = " " + line
+		}
+		rows = append(rows, line)
+	}
+	rows = append(rows, "", uiDimStyle.Render(" enter roll back · j/k move · esc cancel"))
+	return boxWithTitle(uiHdrStyle.Render(" ↺ rollback "+pk.app+" "), "", rows, 48)
+}

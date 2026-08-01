@@ -251,8 +251,13 @@ func backupCronJob(app *dsl.App, volName string, isShared bool) *batchv1.CronJob
 	}
 }
 
+// LocalBackupHostPath is where local backup repositories live on the
+// node; mount a dedicated disk there for real durability.
+const LocalBackupHostPath = "/var/lib/jekyo/backups"
+
 // BackupPodSpec is the shared pod shape for scheduled backups and the
-// on-demand backup/ls/restore jobs the CLI creates.
+// on-demand backup/ls/restore jobs the CLI creates. The local backup
+// directory is always mounted; S3 targets simply never touch it.
 func BackupPodSpec(appName, volName, claimName string, command []string, readWrite bool) corev1.PodSpec {
 	env := []corev1.EnvVar{
 		{Name: "JEKYO_BACKUP_REPO_BASE", ValueFrom: &corev1.EnvVarSource{SecretKeyRef: &corev1.SecretKeySelector{
@@ -272,16 +277,28 @@ func BackupPodSpec(appName, volName, claimName string, command []string, readWri
 			Image:   ResticImage,
 			Command: command,
 			Env:     env,
-			VolumeMounts: []corev1.VolumeMount{{
-				Name: "data", MountPath: "/data", ReadOnly: !readWrite,
-			}},
-		}},
-		Volumes: []corev1.Volume{{
-			Name: "data",
-			VolumeSource: corev1.VolumeSource{
-				PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: claimName},
+			VolumeMounts: []corev1.VolumeMount{
+				{Name: "data", MountPath: "/data", ReadOnly: !readWrite},
+				{Name: "local-repo", MountPath: "/repo"},
 			},
 		}},
+		Volumes: []corev1.Volume{
+			{
+				Name: "data",
+				VolumeSource: corev1.VolumeSource{
+					PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: claimName},
+				},
+			},
+			{
+				Name: "local-repo",
+				VolumeSource: corev1.VolumeSource{
+					HostPath: &corev1.HostPathVolumeSource{
+						Path: LocalBackupHostPath,
+						Type: func() *corev1.HostPathType { t := corev1.HostPathDirectoryOrCreate; return &t }(),
+					},
+				},
+			},
+		},
 	}
 }
 

@@ -39,15 +39,22 @@ func newBackupCmd() *cobra.Command {
 
 func newBackupConfigCmd() *cobra.Command {
 	var endpoint, bucket, accessKey, secretKey string
+	var local bool
 	cmd := &cobra.Command{
 		Use:   "config",
 		Short: "Set the cluster's backup target (once per cluster)",
-		Long: `Stores the S3 target and an encryption password in the cluster. Every
+		Long: `Stores the backup target and an encryption password in the cluster. Every
 volume with a backup: schedule uses it. Works with AWS S3, Cloudflare R2,
-Backblaze B2, MinIO, or any S3-compatible storage.`,
+Backblaze B2, MinIO, or any S3-compatible storage, or with --local, a
+directory on the server itself (` + compile.LocalBackupHostPath + `).
+Mount a dedicated disk there; a backup on the disk that dies with the
+data protects against mistakes, not hardware.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if endpoint == "" || bucket == "" || accessKey == "" || secretKey == "" {
-				return fmt.Errorf("all of --endpoint, --bucket, --access-key, --secret-key are required")
+			if local && (endpoint != "" || bucket != "" || accessKey != "" || secretKey != "") {
+				return fmt.Errorf("--local and the S3 flags are mutually exclusive")
+			}
+			if !local && (endpoint == "" || bucket == "" || accessKey == "" || secretKey == "") {
+				return fmt.Errorf("all of --endpoint, --bucket, --access-key, --secret-key are required (or use --local)")
 			}
 			d, err := newDeployer()
 			if err != nil {
@@ -57,6 +64,10 @@ Backblaze B2, MinIO, or any S3-compatible storage.`,
 			defer cancel()
 
 			repoBase := "s3:" + strings.TrimSuffix(endpoint, "/") + "/" + bucket
+			if local {
+				// backup pods always mount the local directory at /repo
+				repoBase = "/repo"
+			}
 			data := map[string][]byte{
 				"repo-base":  []byte(repoBase),
 				"access-key": []byte(accessKey),
@@ -89,7 +100,11 @@ Backblaze B2, MinIO, or any S3-compatible storage.`,
 			if err != nil {
 				return err
 			}
-			cmd.Println("Backup target configured:", repoBase)
+			target := repoBase
+			if local {
+				target = compile.LocalBackupHostPath + " on the server"
+			}
+			cmd.Println("Backup target configured:", target)
 			cmd.Println("Volumes with a backup: schedule will use it on their next 'jekyo up'.")
 			cmd.Println("IMPORTANT: the encryption password lives only in this cluster. Export a copy:")
 			cmd.Println("  jekyo kubectl -- get secret -n kube-system jekyo-backup -o yaml > backup-secret.yaml")
@@ -100,6 +115,7 @@ Backblaze B2, MinIO, or any S3-compatible storage.`,
 	cmd.Flags().StringVar(&bucket, "bucket", "", "bucket name (must exist)")
 	cmd.Flags().StringVar(&accessKey, "access-key", "", "S3 access key")
 	cmd.Flags().StringVar(&secretKey, "secret-key", "", "S3 secret key")
+	cmd.Flags().BoolVar(&local, "local", false, "store backups on the server at "+compile.LocalBackupHostPath)
 	return cmd
 }
 
