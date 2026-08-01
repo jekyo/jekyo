@@ -127,8 +127,10 @@ restore tools (pg_dump, mysqldump, redis SAVE) over raw file copies.
 jekyo render [-f file]         # ALWAYS check generated Kubernetes YAML before deploying
 jekyo up [-f file] [--env-file .env]
 jekyo ls | ps [app] | status <app>       # -o json on list commands
-jekyo logs <app>[/<service>] [-f] [--since 1h] [--tail N]
+jekyo logs <app>[/<service>] [-f] [-t] [--since 1h] [--tail N]   # -t prefixes timestamps
 jekyo exec <app>/<service> -- <cmd>
+jekyo attach <app>/<service>   # stream the main process output; Ctrl+C detaches
+jekyo top [app] --json         # resource snapshot: per-pod cpu/mem/restarts + node capacity; ALWAYS pass --json
 jekyo restart <app>[/<service>]
 jekyo history <app> | rollback <app> [rev]
 jekyo down [app] [--volumes]

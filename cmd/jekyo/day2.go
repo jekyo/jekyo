@@ -129,6 +129,7 @@ func newLogsCmd() *cobra.Command {
 	var follow bool
 	var since string
 	var tail int64
+	var timestamps bool
 	cmd := &cobra.Command{
 		Use:   "logs <app>[/<service>]",
 		Short: "Show (or follow) logs for an app or one service",
@@ -148,7 +149,7 @@ func newLogsCmd() *cobra.Command {
 				return fmt.Errorf("no pods for %s", args[0])
 			}
 
-			opts := &corev1.PodLogOptions{Follow: follow}
+			opts := &corev1.PodLogOptions{Follow: follow, Timestamps: timestamps}
 			if tail > 0 {
 				opts.TailLines = &tail
 			}
@@ -191,6 +192,71 @@ func newLogsCmd() *cobra.Command {
 	cmd.Flags().BoolVarP(&follow, "follow", "f", false, "stream new log lines")
 	cmd.Flags().StringVar(&since, "since", "", "only logs newer than a duration (e.g. 1h)")
 	cmd.Flags().Int64Var(&tail, "tail", 200, "lines of recent logs per pod (0 = all)")
+	cmd.Flags().BoolVarP(&timestamps, "timestamps", "t", false, "prefix each line with its RFC3339 timestamp")
+	return cmd
+}
+
+func newAttachCmd() *cobra.Command {
+	var stdin bool
+	cmd := &cobra.Command{
+		Use:   "attach <app>/<service>",
+		Short: "Attach to the running process of a service (Ctrl+C detaches)",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			appName, svc := splitTarget(args[0])
+			if svc == "" {
+				return fmt.Errorf("target must be <app>/<service>")
+			}
+			d, err := newDeployer()
+			if err != nil {
+				return err
+			}
+			ctx := cmd.Context()
+			pods, err := d.Client.Typed.CoreV1().Pods(compile.NamespaceFor(appName)).List(ctx, metav1.ListOptions{LabelSelector: podSelector(appName, svc)})
+			if err != nil {
+				return err
+			}
+			var pod *corev1.Pod
+			for i := range pods.Items {
+				if pods.Items[i].Status.Phase == corev1.PodRunning {
+					pod = &pods.Items[i]
+					break
+				}
+			}
+			if pod == nil {
+				return fmt.Errorf("no running pod for %s", args[0])
+			}
+
+			tty := stdin && term.IsTerminal(int(os.Stdin.Fd()))
+			req := d.Client.Typed.CoreV1().RESTClient().Post().
+				Resource("pods").Namespace(compile.NamespaceFor(appName)).Name(pod.Name).SubResource("attach").
+				VersionedParams(&corev1.PodAttachOptions{
+					Container: svc,
+					Stdin:     stdin,
+					Stdout:    true,
+					Stderr:    true,
+					TTY:       tty,
+				}, scheme.ParameterCodec)
+			executor, err := remotecommand.NewSPDYExecutor(d.Client.Config, "POST", req.URL())
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(cmd.ErrOrStderr(), "Attached to %s (pod %s). Ctrl+C detaches without stopping it.\n", args[0], pod.Name)
+			streamOpts := remotecommand.StreamOptions{Stdout: os.Stdout, Stderr: os.Stderr}
+			if stdin {
+				if tty {
+					oldState, err := term.MakeRaw(int(os.Stdin.Fd()))
+					if err == nil {
+						defer term.Restore(int(os.Stdin.Fd()), oldState)
+					}
+					streamOpts.Tty = true
+				}
+				streamOpts.Stdin = os.Stdin
+			}
+			return executor.StreamWithContext(ctx, streamOpts)
+		},
+	}
+	cmd.Flags().BoolVarP(&stdin, "stdin", "i", false, "forward stdin to the process (needs a TTY-enabled service)")
 	return cmd
 }
 

@@ -6,6 +6,19 @@ All notable changes to JEKYO are documented here. The format follows
 may contain breaking changes and patches never do. From 1.0 on, breaking
 changes only land in major versions.
 
+## [0.3.0] - 2026-08-01
+
+### Added
+
+- `jekyo top`: a live btop-style resource dashboard. Per-pod CPU, memory,
+  restarts, and status with usage bars against limits, plus node capacity
+  gauges. `jekyo top --json` prints one machine-readable snapshot for
+  agents and scripts.
+- `jekyo attach`: stream a service's main process output live;
+  Ctrl+C detaches without stopping anything. `-i` forwards stdin.
+- `jekyo logs -t/--timestamps` prefixes each line with its RFC3339
+  timestamp.
+
 ## [0.2.2] - 2026-08-01
 
 ### Changed

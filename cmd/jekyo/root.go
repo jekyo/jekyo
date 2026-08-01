@@ -43,6 +43,8 @@ Start with:
 		newPsCmd(),
 		newLogsCmd(),
 		newExecCmd(),
+		newAttachCmd(),
+		newTopCmd(),
 		newRestartCmd(),
 		newStatusCmd(),
 		newHistoryCmd(),
