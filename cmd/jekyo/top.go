@@ -417,7 +417,7 @@ func newTopCmd() *cobra.Command {
 			}
 
 			if term.IsTerminal(int(os.Stdout.Fd())) && !cmd.Flags().Changed("json") {
-				return runUI(d, name, os.Getenv("JEKYO_ASCII") != "")
+				return runUI(d, name, os.Getenv("JEKYO_NERD") != "")
 			}
 			ctx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second)
 			defer cancel()

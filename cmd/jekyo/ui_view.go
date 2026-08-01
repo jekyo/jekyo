@@ -31,8 +31,8 @@ var (
 	uiLabel = lipgloss.NewStyle().Foreground(uiDim)
 )
 
-// Nerd Font glyphs from the FontAwesome range, present in every patched
-// font; --ascii swaps them for plain symbols.
+// Nerd Font glyphs from the FontAwesome range; opt-in via --nerd since
+// they need a patched terminal font.
 var nfIcons = map[string]string{
 	"server": "", // server rack
 	"cpu":    "", // microchip
@@ -48,17 +48,19 @@ var nfIcons = map[string]string{
 	"warn":   "", // warning triangle
 }
 
-var asciiIcons = map[string]string{
-	"server": "≡", "cpu": "⚙", "mem": "▤", "disk": "◫", "net": "⇅",
-	"app": "▣", "logs": "≣", "chart": "▁▄▂", "info": "ℹ", "vol": "⛃",
-	"ok": "✓", "warn": "!",
+// baseIcons render in every monospace font (plain geometric Unicode);
+// this is the default so the UI never shows tofu boxes.
+var baseIcons = map[string]string{
+	"server": "⎈", "cpu": "⚙", "mem": "▦", "disk": "◫", "net": "⇅",
+	"app": "▣", "logs": "≣", "chart": "∿", "info": "ⓘ", "vol": "▥",
+	"ok": "✓", "warn": "▲",
 }
 
 func (m *uiModel) ic(name string) string {
-	if m.icons {
+	if m.nerd {
 		return nfIcons[name]
 	}
-	return asciiIcons[name]
+	return baseIcons[name]
 }
 
 // uiLogo is the 3-line JEKYO wordmark drawn with box glyphs.
