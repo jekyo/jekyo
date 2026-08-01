@@ -456,6 +456,9 @@ func parseUsage(v any) (cpuMilli, memBytes int64) {
 
 // bar renders a btop-style usage bar: [██████░░░░░░] with thresholds.
 func bar(pct float64, width int) string {
+	if width <= 0 {
+		return ""
+	}
 	if pct < 0 {
 		pct = 0
 	}

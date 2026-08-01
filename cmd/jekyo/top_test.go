@@ -24,6 +24,19 @@ func TestRateAndPct(t *testing.T) {
 	}
 }
 
+func TestBarNegativeWidth(t *testing.T) {
+	// regression: narrow terminals fed negative widths into strings.Repeat
+	if bar(50, -1) != "" || bar(50, 0) != "" {
+		t.Error("bar must render empty at non-positive widths")
+	}
+	if barCalm(50, -2) != "" {
+		t.Error("barCalm must render empty at non-positive widths")
+	}
+	if sparkline([]int64{1}, 0) != "" || braille([]int64{1}, -1) != "" {
+		t.Error("graphs must render empty at non-positive widths")
+	}
+}
+
 func TestBarBounds(t *testing.T) {
 	for _, pct := range []float64{-5, 0, 50, 100, 250} {
 		out := bar(pct, 10)

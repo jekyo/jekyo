@@ -123,6 +123,9 @@ func (m *uiModel) splash() string {
 // barCalm renders a meter without alarm thresholds, for metrics where a
 // high value is healthy (Available, Free, Cached).
 func barCalm(pctV float64, width int) string {
+	if width <= 0 {
+		return ""
+	}
 	if pctV < 0 {
 		pctV = 0
 	}
@@ -370,9 +373,13 @@ func (m *uiModel) viewHeader() string {
 		secRows = append(secRows, "")
 		colH++
 	}
-	// brand box: who we are, which version, whether a newer one exists
+	// brand box: who we are, which version, whether a newer one exists;
+	// narrow terminals get the data, not the branding
 	brandW := 24
-	cpuW -= brandW + 1
+	showBrand := m.width >= 132
+	if showBrand {
+		cpuW -= brandW + 1
+	}
 	center := func(str string) string {
 		pad := (brandW - 4 - lipgloss.Width(str)) / 2
 		if pad < 0 {
@@ -404,12 +411,14 @@ func (m *uiModel) viewHeader() string {
 	for len(brandRows)+2 < colTarget {
 		brandRows = append(brandRows, "")
 	}
-	cpuBox := lipgloss.JoinHorizontal(lipgloss.Top,
-		boxWithTitle(uiHdrStyle.Render(" JEKYO "), "", brandRows, brandW),
-		" ",
+	parts := []string{}
+	if showBrand {
+		parts = append(parts, boxWithTitle(uiHdrStyle.Render(" JEKYO "), "", brandRows, brandW), " ")
+	}
+	parts = append(parts,
 		boxWithTitle(btopTitle("¹", "cpu")+uiDimStyle.Render("─· ")+identity+" ", right, cpuRows, cpuW),
-		" ",
-		platCol)
+		" ", platCol)
+	cpuBox := lipgloss.JoinHorizontal(lipgloss.Top, parts...)
 
 	// bottom row: mem, disks, net side by side
 	memW := (w - 2) * 30 / 100

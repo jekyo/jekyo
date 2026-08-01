@@ -6,6 +6,14 @@ All notable changes to JEKYO are documented here. The format follows
 may contain breaking changes and patches never do. From 1.0 on, breaking
 changes only land in major versions.
 
+## [0.15.2] - 2026-08-01
+
+### Fixed
+
+- `jekyo ui` crashed on terminals narrower than ~130 columns (negative
+  meter widths). All gauges and graphs now clamp safely, and the brand
+  box steps aside on narrow terminals instead of squeezing the data.
+
 ## [0.15.1] - 2026-08-01
 
 ### Fixed
