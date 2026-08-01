@@ -45,6 +45,7 @@ Start with:
 		newExecCmd(),
 		newAttachCmd(),
 		newTopCmd(),
+		newUICmd(),
 		newRestartCmd(),
 		newStatusCmd(),
 		newHistoryCmd(),

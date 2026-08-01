@@ -6,6 +6,17 @@ All notable changes to JEKYO are documented here. The format follows
 may contain breaking changes and patches never do. From 1.0 on, breaking
 changes only land in major versions.
 
+## [0.4.0] - 2026-08-01
+
+### Added
+
+- `jekyo ui`: an interactive terminal UI in the spirit of lazydocker and
+  btop combined. Left pane navigates apps and services with live status
+  and resource use; right pane tabs between streaming logs, CPU and
+  memory history graphs, and status with recent events; node capacity
+  gauges in the header. One key acts: `r` restart (with confirm),
+  `b` rollback, `e` exec, `a` attach, `q` quit.
+
 ## [0.3.0] - 2026-08-01
 
 ### Added

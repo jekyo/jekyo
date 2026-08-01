@@ -131,6 +131,7 @@ jekyo logs <app>[/<service>] [-f] [-t] [--since 1h] [--tail N]   # -t prefixes t
 jekyo exec <app>/<service> -- <cmd>
 jekyo attach <app>/<service>   # stream the main process output; Ctrl+C detaches
 jekyo top [app] --json         # resource snapshot: per-pod cpu/mem/restarts + node capacity; ALWAYS pass --json
+jekyo ui                       # interactive TUI for humans; agents must NOT run this (use the --json commands)
 jekyo restart <app>[/<service>]
 jekyo history <app> | rollback <app> [rev]
 jekyo down [app] [--volumes]

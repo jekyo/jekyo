@@ -23,6 +23,7 @@ import (
 
 	"github.com/jekyo/jekyo/internal/compile"
 	"github.com/jekyo/jekyo/internal/contexts"
+	"github.com/jekyo/jekyo/internal/deploy"
 )
 
 // splitTarget parses "app" or "app/service".
@@ -324,6 +325,44 @@ func newExecCmd() *cobra.Command {
 	return cmd
 }
 
+// doRestart rolling-restarts the workloads of app (optionally one service).
+// Shared by the restart command and the TUI.
+func doRestart(ctx context.Context, d *deploy.Deployer, appName, svc string) error {
+	patch := []byte(fmt.Sprintf(
+		`{"spec":{"template":{"metadata":{"annotations":{"jekyo.io/restarted-at":%q}}}}}`,
+		time.Now().UTC().Format(time.RFC3339)))
+	restarted := 0
+	sel := metav1.ListOptions{LabelSelector: podSelector(appName, svc)}
+	deps, err := d.Client.Typed.AppsV1().Deployments(compile.NamespaceFor(appName)).List(ctx, sel)
+	if err != nil {
+		return err
+	}
+	for _, dep := range deps.Items {
+		if _, err := d.Client.Typed.AppsV1().Deployments(compile.NamespaceFor(appName)).Patch(ctx, dep.Name, types.StrategicMergePatchType, patch, metav1.PatchOptions{}); err != nil {
+			return err
+		}
+		restarted++
+	}
+	stss, err := d.Client.Typed.AppsV1().StatefulSets(compile.NamespaceFor(appName)).List(ctx, sel)
+	if err != nil {
+		return err
+	}
+	for _, sts := range stss.Items {
+		if _, err := d.Client.Typed.AppsV1().StatefulSets(compile.NamespaceFor(appName)).Patch(ctx, sts.Name, types.StrategicMergePatchType, patch, metav1.PatchOptions{}); err != nil {
+			return err
+		}
+		restarted++
+	}
+	if restarted == 0 {
+		target := appName
+		if svc != "" {
+			target += "/" + svc
+		}
+		return fmt.Errorf("nothing to restart for %s", target)
+	}
+	return nil
+}
+
 func newRestartCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "restart <app>[/<service>]",
@@ -337,35 +376,10 @@ func newRestartCmd() *cobra.Command {
 			}
 			ctx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second)
 			defer cancel()
-			patch := []byte(fmt.Sprintf(
-				`{"spec":{"template":{"metadata":{"annotations":{"jekyo.io/restarted-at":%q}}}}}`,
-				time.Now().UTC().Format(time.RFC3339)))
-			restarted := 0
-			sel := metav1.ListOptions{LabelSelector: podSelector(appName, svc)}
-			deps, err := d.Client.Typed.AppsV1().Deployments(compile.NamespaceFor(appName)).List(ctx, sel)
-			if err != nil {
+			if err := doRestart(ctx, d, appName, svc); err != nil {
 				return err
 			}
-			for _, dep := range deps.Items {
-				if _, err := d.Client.Typed.AppsV1().Deployments(compile.NamespaceFor(appName)).Patch(ctx, dep.Name, types.StrategicMergePatchType, patch, metav1.PatchOptions{}); err != nil {
-					return err
-				}
-				restarted++
-			}
-			stss, err := d.Client.Typed.AppsV1().StatefulSets(compile.NamespaceFor(appName)).List(ctx, sel)
-			if err != nil {
-				return err
-			}
-			for _, sts := range stss.Items {
-				if _, err := d.Client.Typed.AppsV1().StatefulSets(compile.NamespaceFor(appName)).Patch(ctx, sts.Name, types.StrategicMergePatchType, patch, metav1.PatchOptions{}); err != nil {
-					return err
-				}
-				restarted++
-			}
-			if restarted == 0 {
-				return fmt.Errorf("nothing to restart for %s", args[0])
-			}
-			cmd.Printf("Restarted %d workload(s). Watch with: jekyo ps %s\n", restarted, appName)
+			cmd.Printf("Restarted. Watch with: jekyo ps %s\n", appName)
 			return nil
 		},
 	}
