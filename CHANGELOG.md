@@ -6,6 +6,13 @@ All notable changes to JEKYO are documented here. The format follows
 may contain breaking changes and patches never do. From 1.0 on, breaking
 changes only land in major versions.
 
+## [0.17.0] - 2026-08-01
+
+### Added
+
+- `jekyo templates <query>` fuzzy-searches the catalog by name and
+  description, ranked, for humans and agents alike.
+
 ## [0.16.2] - 2026-08-01
 
 ### Fixed

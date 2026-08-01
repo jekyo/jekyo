@@ -140,7 +140,7 @@ jekyo restart <app>[/<service>]
 jekyo history <app> | rollback <app> [rev]
 jekyo down [app] [--volumes]
 
-jekyo templates | templates inspect <name> [-o json]   # catalog + input requirements
+jekyo templates [query] | templates inspect <name> [-o json]   # catalog; query fuzzy-searches name+description
 jekyo init <name> [--defaults] [--set NAME=value] [--backup daily]
 jekyo backup config|now|ls|restore
 jekyo registry login <host>

@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"sort"
+
+	"github.com/lithammer/fuzzysearch/fuzzy"
 	"strings"
 	"text/tabwriter"
 
@@ -88,12 +90,44 @@ func newSchemaCmd() *cobra.Command {
 	}
 }
 
+// fuzzyTemplates ranks catalog entries against a query: fuzzy on the
+// name first, then substring on descriptions, so "graf" finds grafana
+// and "analytics" finds everything that says so.
+func fuzzyTemplates(all []templates.Template, query string) []templates.Template {
+	ranked := map[string]int{}
+	var out []templates.Template
+	for _, t := range all {
+		if r := fuzzy.RankMatchNormalizedFold(query, t.Name); r >= 0 {
+			ranked[t.Name] = r
+			out = append(out, t)
+		} else if fuzzy.MatchNormalizedFold(query, t.Description) {
+			ranked[t.Name] = 1000 + len(t.Description)
+			out = append(out, t)
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool { return ranked[out[i].Name] < ranked[out[j].Name] })
+	return out
+}
+
 func newTemplatesCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "templates",
-		Short: "List available app templates (catalog + builtin)",
+		Use:   "templates [query]",
+		Short: "List app templates; a query fuzzy-searches the catalog",
+		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			for _, t := range templates.List() {
+			all := templates.List()
+			if len(args) == 1 {
+				matches := fuzzyTemplates(all, args[0])
+				if len(matches) == 0 {
+					return fmt.Errorf("no template matches %q; run jekyo templates to see everything", args[0])
+				}
+				for _, t := range matches {
+					cmd.Printf("%-14s %s\n", t.Name, t.Description)
+				}
+				cmd.Println("\nStart one with: jekyo init <name>")
+				return nil
+			}
+			for _, t := range all {
 				cmd.Printf("%-14s %s\n", t.Name, t.Description)
 			}
 			cmd.Println("\nStart one with: jekyo init <name> (see requirements: jekyo templates inspect <name>)")

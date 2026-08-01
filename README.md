@@ -89,7 +89,7 @@ The full reference lives at
 
 ## Templates
 
-300 ready-to-deploy templates (databases, analytics, automation, media,
+300+ ready-to-deploy templates (databases, analytics, automation, media,
 AI tooling) with an online catalog at
 [jekyo.com/templates](https://jekyo.com/templates):
 
