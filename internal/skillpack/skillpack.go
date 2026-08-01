@@ -49,7 +49,7 @@ func Detect(dir string) []Agent {
 	return out
 }
 
-const skillFrontmatter = "---\nname: jekyo\ndescription: Deploy and operate apps on JEKYO k3s servers — write/edit jekyo.yaml files and drive the jekyo CLI. Use when the user mentions jekyo, deploying to their server, or a jekyo.yaml file, or invokes /jekyo.\n---\n\nYou operate JEKYO through its CLI. Workflow: `jekyo context show` to see the\ntarget server; write or edit jekyo.yaml; ALWAYS `jekyo render` to validate\nbefore `jekyo up`; then check with `jekyo ps <app>` / `jekyo status <app>`.\nRead surfaces support `-o json`. Full reference below (also available\nanywhere via `jekyo skill show`).\n\n"
+const skillFrontmatter = "---\nname: jekyo\ndescription: Deploy and operate apps on JEKYO k3s servers. Write and edit jekyo.yaml files, drive the jekyo CLI, and migrate docker-compose apps. Use when the user mentions jekyo, deploying to their server, or a jekyo.yaml file, or invokes /jekyo.\n---\n\nYou operate JEKYO through its CLI. Workflow: `jekyo context show` to see the\ntarget server; write or edit jekyo.yaml; ALWAYS `jekyo render` to validate\nbefore `jekyo up`; then check with `jekyo ps <app>` / `jekyo status <app>`.\nRead surfaces support `-o json`. Full reference below (also available\nanywhere via `jekyo skill show`).\n\n"
 
 // Install writes/refreshes the instruction pack for each agent.
 // Project scope: files under dir. Global scope (global=true): user-level
