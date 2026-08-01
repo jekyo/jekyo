@@ -109,8 +109,18 @@ func validate(app *App) error {
 		if !nameRe.MatchString(name) {
 			bad("%s: name must be lowercase alphanumeric/dashes", p)
 		}
-		if svc.Image == "" && svc.Build == nil {
-			bad("%s: needs image: or build:", p)
+		isRedirect := svc.HTTP != nil && svc.HTTP.Redirect != ""
+		if isRedirect {
+			// a redirect is pure routing: nothing may run
+			if svc.Image != "" || svc.Build != nil || len(svc.AllPorts()) > 0 ||
+				len(svc.Volumes) > 0 || len(svc.Env) > 0 || svc.Schedule != "" ||
+				len(svc.Expose) > 0 || svc.Health != nil || svc.GPU.Count > 0 {
+				bad("%s: http.redirect services define only http.domain and http.redirect", p)
+			}
+		} else {
+			if svc.Image == "" && svc.Build == nil {
+				bad("%s: needs image: or build:", p)
+			}
 		}
 		if svc.Image != "" && svc.Build != nil {
 			bad("%s: image: and build: are mutually exclusive", p)
@@ -124,7 +134,7 @@ func validate(app *App) error {
 			if svc.HTTP.Domain == "" {
 				bad("%s: http.domain is required", p)
 			}
-			if svc.MainPort() == 0 {
+			if !isRedirect && svc.MainPort() == 0 {
 				bad("%s: http requires a port", p)
 			}
 			if svc.HTTP.Auth != "" && svc.HTTP.Auth != "basic" {

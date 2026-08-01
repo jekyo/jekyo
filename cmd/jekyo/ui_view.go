@@ -130,7 +130,7 @@ func barCalm(pctV float64, width int) string {
 		pctV = 100
 	}
 	filled := int(pctV/100*float64(width) + 0.5)
-	return "\033[38;5;108m" + strings.Repeat("█", filled) + "\033[2m" + strings.Repeat("░", width-filled) + "\033[0m"
+	return "\033[38;5;108m" + strings.Repeat("▄", filled) + "\033[38;5;238m" + strings.Repeat("▄", width-filled) + "\033[0m"
 }
 
 var sparkBlocks = []rune("▁▂▃▄▅▆▇█")
@@ -258,20 +258,6 @@ func (m *uiModel) viewHeader() string {
 	// cpu box: summary row plus the per-core grid
 	sum := fmt.Sprintf("%s %s %5.1f%%  %s",
 		uiDimStyle.Render("total"), bar(n.CPUPct, 16), n.CPUPct, uiAccent.Render(braille(cpus, 16)))
-	if m.tempC > 0 {
-		sum += fmt.Sprintf("    %s %d°C", uiDimStyle.Render("temp"), m.tempC)
-	}
-	if m.load != "" {
-		sum += "    " + uiDimStyle.Render("load ") + m.load
-	}
-	sum += fmt.Sprintf("    %s %dms", uiDimStyle.Render("api"), m.snap.APIMs)
-	if m.snap.CertDays >= 0 {
-		certs := fmt.Sprintf("%s %dd", uiDimStyle.Render("certs"), m.snap.CertDays)
-		if m.snap.CertDays < 14 {
-			certs = uiRed.Render(fmt.Sprintf("%s certs %dd", m.ic("warn"), m.snap.CertDays))
-		}
-		sum += "    " + certs
-	}
 	if n.MetricsMissed {
 		sum += "  " + uiRed.Render(m.ic("warn")+" metrics warming up")
 	}
@@ -299,7 +285,44 @@ func (m *uiModel) viewHeader() string {
 			cpuRows = append(cpuRows, strings.TrimRight(line.String(), " "))
 		}
 	}
-	cpuBox := boxWithTitle(btopTitle("¹", "cpu")+uiDimStyle.Render("─· ")+identity+" ", right, cpuRows, w)
+	platW := 34
+	cpuW := w - platW - 1
+	failing := 0
+	for _, p := range m.snap.Pods {
+		if p.Status != "Running" {
+			failing++
+		}
+	}
+	apps := map[string]bool{}
+	for _, p := range m.snap.Pods {
+		apps[p.App] = true
+	}
+	podsLine := fmt.Sprintf("%s %d  %s %d", uiDimStyle.Render("apps"), len(apps), uiDimStyle.Render("pods"), n.PodCount)
+	if failing > 0 {
+		podsLine += "  " + uiRed.Render(fmt.Sprintf("%s %d failing", m.ic("warn"), failing))
+	} else {
+		podsLine += "  " + uiGreen.Render(m.ic("ok")+" all healthy")
+	}
+	platRows := []string{
+		podsLine,
+		fmt.Sprintf("%s %d  %s %d", uiDimStyle.Render("services"), m.snap.Services, uiDimStyle.Render("domains"), m.snap.Domains),
+	}
+	if m.domain != "" {
+		platRows = append(platRows, uiDimStyle.Render("domain ")+m.domain)
+	}
+	platRows = append(platRows,
+		uiDimStyle.Render("k8s   ")+n.K8sVersion,
+		uiDimStyle.Render("jekyo ")+version)
+	for len(platRows)+2 < len(cpuRows)+2 {
+		platRows = append(platRows, "")
+	}
+	for len(cpuRows)+2 < len(platRows)+2 {
+		cpuRows = append(cpuRows, "")
+	}
+	cpuBox := lipgloss.JoinHorizontal(lipgloss.Top,
+		boxWithTitle(btopTitle("¹", "cpu")+uiDimStyle.Render("─· ")+identity+" ", right, cpuRows, cpuW),
+		" ",
+		boxWithTitle(btopTitle("⁰", "server"), "", platRows, platW))
 
 	// bottom row: mem, disks, net side by side
 	memW := (w - 2) * 30 / 100
@@ -614,19 +637,43 @@ func (m *uiModel) viewFooter() string {
 			Padding(0, 1).Render(m.confirm.prompt)
 	}
 	keys := []struct{ k, label string }{
-		{"j/k", "move"}, {"l", "logs"}, {"s", "status"}, {"m", "graphs on/off"},
+		{"j/k", "move"}, {"l", "logs"}, {"s", "status"}, {"m", "graphs"},
 		{"r", "restart"}, {"b", "rollback"}, {"e", "exec"}, {"a", "attach"}, {"q", "quit"},
 	}
 	parts := make([]string, len(keys))
 	for i, kv := range keys {
-		parts[i] = uiKey.Render(kv.k) + uiLabel.Render(" "+kv.label)
+		parts[i] = uiKey.Render(kv.k) + uiLabel.Render(":"+kv.label)
 	}
-	line := " " + strings.Join(parts, uiLabel.Render("  ·  "))
+	line := " " + strings.Join(parts, "  ")
 	if m.status != "" {
 		line += "   " + uiHdrStyle.Render(m.status)
 	}
 	if m.err != "" {
 		line += "   " + uiRed.Render(m.ic("warn")+" "+m.err)
+	}
+	var vitals []string
+	if m.tempC > 0 {
+		vitals = append(vitals, uiLabel.Render("temp ")+fmt.Sprintf("%d°C", m.tempC))
+	}
+	if m.load != "" {
+		vitals = append(vitals, uiLabel.Render("load ")+m.load)
+	}
+	if m.snap != nil && len(m.snap.Nodes) > 0 {
+		vitals = append(vitals, uiLabel.Render("api ")+fmt.Sprintf("%dms", m.snap.APIMs))
+		if m.snap.CertDays >= 0 {
+			c := uiLabel.Render("certs ") + fmt.Sprintf("%dd", m.snap.CertDays)
+			if m.snap.CertDays < 14 {
+				c = uiRed.Render(fmt.Sprintf("%s certs %dd", m.ic("warn"), m.snap.CertDays))
+			}
+			vitals = append(vitals, c)
+		}
+	}
+	if len(vitals) > 0 {
+		right := strings.Join(vitals, "    ")
+		pad := m.width - lipgloss.Width(line) - lipgloss.Width(right) - 2
+		if pad > 1 {
+			line += strings.Repeat(" ", pad) + right
+		}
 	}
 	return line
 }

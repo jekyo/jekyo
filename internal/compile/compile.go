@@ -18,6 +18,7 @@ import (
 	networkingv1 "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/intstr"
 
@@ -89,6 +90,11 @@ func Compile(app *dsl.App, opts Options) ([]runtime.Object, error) {
 
 	for _, name := range sortedKeys(app.Services) {
 		svc := app.Services[name]
+		if svc.HTTP != nil && svc.HTTP.Redirect != "" {
+			// pure routing rule: the ingress answers, nothing runs
+			objs = append(objs, redirectObjects(app, name, svc.HTTP)...)
+			continue
+		}
 		if svc.Image == "" {
 			return nil, fmt.Errorf("service %s: build: must be resolved before compile (internal error) — or use image:", name)
 		}
@@ -556,6 +562,67 @@ func ingress(app *dsl.App, name string, svc dsl.Service) *networkingv1.Ingress {
 		ing.Spec.TLS = []networkingv1.IngressTLS{{Hosts: []string{h.Domain}, SecretName: name + "-tls"}}
 	}
 	return ing
+}
+
+// redirectObjects compiles http.redirect into an Envoy-native redirect:
+// a Contour HTTPProxy with a requestRedirectPolicy, plus a kcert
+// cert-request ConfigMap so the domain still gets a certificate. kcert
+// names the issued Secret after the ConfigMap, so <name>-tls matches what
+// an Ingress-managed cert for this service would have used.
+func redirectObjects(app *dsl.App, name string, h *dsl.HTTP) []runtime.Object {
+	tls := h.TLS == nil || *h.TLS
+	scheme, target := "https", h.Redirect
+	if s, rest, ok := strings.Cut(target, "://"); ok {
+		scheme, target = s, rest
+	}
+	target = strings.TrimSuffix(target, "/")
+
+	lbl := map[string]any{}
+	for k, v := range labels(app, name) {
+		lbl[k] = v
+	}
+	vhost := map[string]any{"fqdn": h.Domain}
+	var objs []runtime.Object
+	if tls {
+		vhost["tls"] = map[string]any{"secretName": name + "-tls"}
+		objs = append(objs, &corev1.ConfigMap{
+			TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "ConfigMap"},
+			ObjectMeta: metav1.ObjectMeta{
+				Name: name + "-tls", Namespace: NamespaceFor(app.Name),
+				Labels: mergeLabels(labels(app, name), map[string]string{"kcert.dev/cert-request": "request"}),
+			},
+			Data: map[string]string{"hosts": h.Domain},
+		})
+	}
+	objs = append(objs, &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "projectcontour.io/v1",
+		"kind":       "HTTPProxy",
+		"metadata": map[string]any{
+			"name": name, "namespace": NamespaceFor(app.Name), "labels": lbl,
+		},
+		"spec": map[string]any{
+			"virtualhost": vhost,
+			"routes": []any{map[string]any{
+				"requestRedirectPolicy": map[string]any{
+					"hostname":   target,
+					"scheme":     scheme,
+					"statusCode": int64(301),
+				},
+			}},
+		},
+	}})
+	return objs
+}
+
+func mergeLabels(a, b map[string]string) map[string]string {
+	out := map[string]string{}
+	for k, v := range a {
+		out[k] = v
+	}
+	for k, v := range b {
+		out[k] = v
+	}
+	return out
 }
 
 func portName(p int) string { return "p" + strconv.Itoa(p) }

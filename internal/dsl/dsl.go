@@ -104,6 +104,10 @@ type HTTP struct {
 	// server was installed with a domain.
 	TLS  *bool  `yaml:"tls"`
 	Auth string `yaml:"auth"`
+	// Redirect makes this a pure routing rule: requests to Domain are
+	// answered by the ingress with a permanent redirect to this host (or
+	// URL). A redirect service runs no container and defines nothing else.
+	Redirect string `yaml:"redirect"`
 }
 
 // Expose publishes a raw TCP/UDP port on the node (NodePort).

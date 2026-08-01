@@ -71,6 +71,7 @@ type topNode struct {
 	DiskPct       float64 `json:"diskPercent,omitempty"`
 	NetRxBytes    int64   `json:"networkRxBytes,omitempty"` // cumulative
 	NetTxBytes    int64   `json:"networkTxBytes,omitempty"` // cumulative
+	K8sVersion    string  `json:"k8sVersion,omitempty"`
 	PodCount      int     `json:"pods"`
 	MetricsMissed bool    `json:"metricsUnavailable,omitempty"`
 }
@@ -80,6 +81,8 @@ type topSnapshot struct {
 	Time    string      `json:"time"`
 	APIMs    int64 `json:"apiLatencyMs"`
 	CertDays int   `json:"nearestCertExpiryDays"` // -1 when no certs found
+	Services int   `json:"services"`
+	Domains  int   `json:"domains"`
 	Nodes   []topNode   `json:"nodes"`
 	Pods    []topPod    `json:"pods"`
 	Volumes []topVolume `json:"volumes,omitempty"`
@@ -185,6 +188,28 @@ func gatherTop(ctx context.Context, d *deploy.Deployer, contextName, app string)
 	}
 
 	snap := &topSnapshot{Context: contextName, Time: time.Now().UTC().Format(time.RFC3339), takenAt: time.Now(), APIMs: apiMs, CertDays: -1}
+
+	if svcs, err := d.Client.Typed.CoreV1().Services("").List(ctx, metav1.ListOptions{LabelSelector: compile.LabelApp}); err == nil {
+		snap.Services = len(svcs.Items)
+	}
+	hosts := map[string]bool{}
+	if ings, err := d.Client.Typed.NetworkingV1().Ingresses("").List(ctx, metav1.ListOptions{}); err == nil {
+		for _, ing := range ings.Items {
+			for _, r := range ing.Spec.Rules {
+				if r.Host != "" {
+					hosts[r.Host] = true
+				}
+			}
+		}
+	}
+	if hps, err := d.Client.Dynamic.Resource(schema.GroupVersionResource{Group: "projectcontour.io", Version: "v1", Resource: "httpproxies"}).List(ctx, metav1.ListOptions{}); err == nil {
+		for _, hp := range hps.Items {
+			if fqdn, ok, _ := unstructured.NestedString(hp.Object, "spec", "virtualhost", "fqdn"); ok && fqdn != "" {
+				hosts[fqdn] = true
+			}
+		}
+	}
+	snap.Domains = len(hosts)
 
 	// nearest TLS certificate expiry across the cluster
 	if secs, err := d.Client.Typed.CoreV1().Secrets("").List(ctx, metav1.ListOptions{FieldSelector: "type=kubernetes.io/tls"}); err == nil {
@@ -310,6 +335,7 @@ func gatherTop(ctx context.Context, d *deploy.Deployer, contextName, app string)
 			Name: n.Name, CPUMilli: u[0], MemBytes: u[1],
 			CPUCapMilli:   n.Status.Allocatable.Cpu().MilliValue(),
 			MemCapBytes:   n.Status.Allocatable.Memory().Value(),
+			K8sVersion:    n.Status.NodeInfo.KubeletVersion,
 			MetricsMissed: !metricsOK,
 		}
 		if s, ok := sums[n.Name]; ok {
@@ -394,7 +420,7 @@ func bar(pct float64, width int) string {
 	} else if pct >= 60 {
 		color = "\033[33m" // yellow
 	}
-	return color + strings.Repeat("█", filled) + "\033[2m" + strings.Repeat("░", width-filled) + "\033[0m"
+	return color + strings.Repeat("▄", filled) + "\033[38;5;238m" + strings.Repeat("▄", width-filled) + "\033[0m"
 }
 
 func fmtMem(b int64) string {

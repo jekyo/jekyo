@@ -35,6 +35,9 @@ services:               # required, at least one
       domain: api.example.com # required inside http
       path: /                 # default /
       tls: true               # default true; automatic certificate
+      redirect: example.com   # domain-level redirect answered by the ingress;
+                              # a redirect service defines NOTHING else (no
+                              # image/build/port), it runs no container
     expose:                   # raw TCP/UDP on the node
       - port: 5432
         node: 30432           # NodePort 30000-32767
@@ -105,6 +108,7 @@ Convert a compose file to jekyo.yaml with these rules:
 | `healthcheck.test: [CMD, x]` | `health.command: [x]` |
 | `healthcheck.test: [CMD-SHELL, x]` | `health.command: [sh, -c, x]` |
 | exposed web service | add `http: {domain: ...}` to it |
+| www/apex redirect rules (nginx/caddy blocks) | a service with only `http: {domain, redirect}` |
 | secrets in env | move values to `.env`, reference as `${VAR}` |
 
 Compact multiple data volumes into one volume with subpaths and one size.

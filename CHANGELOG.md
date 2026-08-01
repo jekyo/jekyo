@@ -6,6 +6,25 @@ All notable changes to JEKYO are documented here. The format follows
 may contain breaking changes and patches never do. From 1.0 on, breaking
 changes only land in major versions.
 
+## [0.12.0] - 2026-08-01
+
+### Added
+
+- `http.redirect`: a service with only `http: {domain, redirect}` is a
+  pure routing rule. The ingress answers with a permanent redirect and
+  the domain keeps automatic TLS; no container runs. www-to-apex
+  redirects no longer need an inline Caddy image.
+- The `jekyo ui` header gains a server box: apps, pods with a health
+  verdict, services, hosted domains, cluster domain, Kubernetes and
+  JEKYO versions. Vitals (temperature, load, API latency, certificate
+  runway) moved to the footer's right side.
+- `jekyo top --json` gains `services` and `domains` counts.
+
+### Changed
+
+- Meters render as slim half-height bars; filled gauges no longer merge
+  into blocks across adjacent lines.
+
 ## [0.11.1] - 2026-08-01
 
 ### Fixed

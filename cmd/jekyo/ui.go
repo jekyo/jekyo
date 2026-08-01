@@ -106,6 +106,7 @@ type confirmState struct {
 type uiModel struct {
 	d       *deploy.Deployer
 	ctxName string
+	domain  string
 	nerd    bool
 	sshc    *sshx.Client // best-effort; load average and uptime
 
@@ -733,15 +734,17 @@ func newUICmd() *cobra.Command {
 func runUI(d *deploy.Deployer, ctxName string, nerd bool) error {
 	// best-effort SSH for load average and uptime; the UI works without it
 	var sshc *sshx.Client
+	domain := ""
 	if store, err := contexts.Open(); err == nil {
 		if meta, err := store.Resolve(contextFlag); err == nil {
+			domain = meta.Domain
 			if c, err := sshx.Dial(meta.SSH, sshx.Options{KeyPath: sshKeyFlag}); err == nil {
 				sshc = c
 			}
 		}
 	}
 	m := &uiModel{
-		d: d, ctxName: ctxName, sshc: sshc,
+		d: d, ctxName: ctxName, domain: domain, sshc: sshc,
 		graphs: true,
 		nerd:   nerd || os.Getenv("JEKYO_NERD") != "",
 		snap:   &topSnapshot{},

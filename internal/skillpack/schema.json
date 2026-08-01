@@ -4,36 +4,64 @@
   "title": "jekyo.yaml",
   "type": "object",
   "additionalProperties": false,
-  "required": ["app", "services"],
+  "required": [
+    "app",
+    "services"
+  ],
   "properties": {
     "app": {
       "type": "string",
       "pattern": "^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$",
       "description": "App name; becomes the Kubernetes namespace."
     },
-    "description": { "type": "string", "description": "One-line description (catalog/dashboard metadata)." },
-    "icon": { "type": "string", "description": "Logo URL (catalog/dashboard metadata)." },
+    "description": {
+      "type": "string",
+      "description": "One-line description (catalog/dashboard metadata)."
+    },
+    "icon": {
+      "type": "string",
+      "description": "Logo URL (catalog/dashboard metadata)."
+    },
     "services": {
       "type": "object",
       "minProperties": 1,
-      "additionalProperties": { "$ref": "#/definitions/service" }
+      "additionalProperties": {
+        "$ref": "#/definitions/service"
+      }
     },
     "volumes": {
       "type": "object",
       "additionalProperties": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["size"],
+        "required": [
+          "size"
+        ],
         "properties": {
-          "size": { "type": "string", "description": "PVC size, e.g. 10Gi" },
-          "class": { "type": "string", "description": "Storage class (default local-path)" },
+          "size": {
+            "type": "string",
+            "description": "PVC size, e.g. 10Gi"
+          },
+          "class": {
+            "type": "string",
+            "description": "Storage class (default local-path)"
+          },
           "backup": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["schedule"],
+            "required": [
+              "schedule"
+            ],
             "properties": {
-              "schedule": { "type": "string", "description": "Cron expression for snapshots" },
-              "keep": { "type": "integer", "minimum": 1, "default": 7 }
+              "schedule": {
+                "type": "string",
+                "description": "Cron expression for snapshots"
+              },
+              "keep": {
+                "type": "integer",
+                "minimum": 1,
+                "default": 7
+              }
             }
           }
         }
@@ -45,31 +73,92 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "image": { "type": "string" },
+        "image": {
+          "type": "string"
+        },
         "build": {
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "context": { "type": "string", "default": "." },
-            "dockerfile": { "type": "string", "description": "Dockerfile path (exclusive with inline)" },
-            "inline": { "type": "string", "description": "Literal Dockerfile contents (exclusive with dockerfile)" },
-            "args": { "type": "object", "additionalProperties": { "type": "string" } }
+            "context": {
+              "type": "string",
+              "default": "."
+            },
+            "dockerfile": {
+              "type": "string",
+              "description": "Dockerfile path (exclusive with inline)"
+            },
+            "inline": {
+              "type": "string",
+              "description": "Literal Dockerfile contents (exclusive with dockerfile)"
+            },
+            "args": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
           }
         },
-        "command": { "type": "array", "items": { "type": "string" } },
-        "args": { "type": "array", "items": { "type": "string" } },
-        "env": { "type": "object", "additionalProperties": { "type": "string" } },
-        "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
-        "ports": { "type": "array", "items": { "type": "integer", "minimum": 1, "maximum": 65535 } },
+        "command": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "args": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "env": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "ports": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535
+          }
+        },
         "http": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["domain"],
+          "required": [
+            "domain"
+          ],
           "properties": {
-            "domain": { "type": "string" },
-            "path": { "type": "string", "default": "/" },
-            "tls": { "type": "boolean", "default": true },
-            "auth": { "type": "string", "enum": ["basic"] }
+            "domain": {
+              "type": "string"
+            },
+            "path": {
+              "type": "string",
+              "default": "/"
+            },
+            "tls": {
+              "type": "boolean",
+              "default": true
+            },
+            "auth": {
+              "type": "string",
+              "enum": [
+                "basic"
+              ]
+            },
+            "redirect": {
+              "type": "string",
+              "description": "Answer requests to this domain with a permanent redirect to the given host or URL; the service runs no container and must define nothing else."
+            }
           }
         },
         "expose": {
@@ -77,11 +166,25 @@
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["port"],
+            "required": [
+              "port"
+            ],
             "properties": {
-              "port": { "type": "integer" },
-              "node": { "type": "integer", "minimum": 30000, "maximum": 32767 },
-              "protocol": { "type": "string", "enum": ["tcp", "udp"] }
+              "port": {
+                "type": "integer"
+              },
+              "node": {
+                "type": "integer",
+                "minimum": 30000,
+                "maximum": 32767
+              },
+              "protocol": {
+                "type": "string",
+                "enum": [
+                  "tcp",
+                  "udp"
+                ]
+              }
             }
           }
         },
@@ -89,38 +192,72 @@
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "cpu": { "type": "string" },
-            "memory": { "type": "string" },
-            "cpu-max": { "type": "string" },
-            "memory-max": { "type": "string" }
+            "cpu": {
+              "type": "string"
+            },
+            "memory": {
+              "type": "string"
+            },
+            "cpu-max": {
+              "type": "string"
+            },
+            "memory-max": {
+              "type": "string"
+            }
           }
         },
-        "replicas": { "type": "integer", "minimum": 0 },
-        "stateful": { "type": "boolean" },
+        "replicas": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "stateful": {
+          "type": "boolean"
+        },
         "health": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["path"],
+          "required": [
+            "path"
+          ],
           "properties": {
-            "path": { "type": "string" },
-            "port": { "type": "integer" }
+            "path": {
+              "type": "string"
+            },
+            "port": {
+              "type": "integer"
+            }
           }
         },
         "gpu": {
           "oneOf": [
-            { "type": "integer", "minimum": 0 },
+            {
+              "type": "integer",
+              "minimum": 0
+            },
             {
               "type": "object",
               "additionalProperties": false,
               "properties": {
-                "count": { "type": "integer" },
-                "devices": { "type": "string" }
+                "count": {
+                  "type": "integer"
+                },
+                "devices": {
+                  "type": "string"
+                }
               }
             }
           ]
         },
-        "schedule": { "type": "string", "description": "Cron expression; makes this service a CronJob." },
-        "volumes": { "type": "object", "additionalProperties": { "type": "string" } }
+        "schedule": {
+          "type": "string",
+          "description": "Cron expression; makes this service a CronJob."
+        },
+        "volumes": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
       }
     }
   }

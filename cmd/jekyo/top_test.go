@@ -27,7 +27,7 @@ func TestRateAndPct(t *testing.T) {
 func TestBarBounds(t *testing.T) {
 	for _, pct := range []float64{-5, 0, 50, 100, 250} {
 		out := bar(pct, 10)
-		if n := strings.Count(out, "█") + strings.Count(out, "░"); n != 10 {
+		if n := strings.Count(out, "▄"); n != 10 {
 			t.Errorf("bar(%v) rendered %d cells, want 10", pct, n)
 		}
 	}
