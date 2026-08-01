@@ -1,0 +1,39 @@
+name: Bug report
+description: Something broke or behaved unexpectedly
+labels: [bug]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: JEKYO version
+      description: Output of `jekyo version`
+      placeholder: v0.2.2
+    validations:
+      required: true
+  - type: input
+    id: server
+    attributes:
+      label: Server
+      description: OS and architecture of the target server, if relevant
+      placeholder: Ubuntu 24.04, amd64
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What did you run, what did you expect, what happened instead
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to reproduce
+      description: Commands and, when relevant, the jekyo.yaml (redact secrets)
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Output
+      description: Full command output. `jekyo status <app>` and `jekyo logs` often help.
+      render: shell

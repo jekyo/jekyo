@@ -1,0 +1,21 @@
+name: Feature request
+description: Something JEKYO should do
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do that JEKYO makes hard or impossible today
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: How you imagine it working. DSL sketches and command examples welcome.
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Workarounds tried
+      description: What you do today instead, if anything

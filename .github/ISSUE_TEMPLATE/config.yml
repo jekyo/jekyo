@@ -1,0 +1,11 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Documentation
+    url: https://jekyo.com/docs/getting-started
+    about: Guides and the full jekyo.yaml reference
+  - name: Security reports
+    url: https://github.com/jekyo/jekyo/security/advisories/new
+    about: Report vulnerabilities privately, never as public issues
+  - name: Template catalog issues
+    url: https://github.com/jekyo/templates/issues
+    about: Problems with a specific app template belong in the templates repo
