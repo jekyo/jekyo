@@ -31,6 +31,11 @@ type snapMsg struct {
 	cores  []float64  // per-core utilization 0-100
 	mounts []mountRow // real filesystems with usage
 	tempC  int        // package temperature, 0 = unknown
+	mem    memInfo
+}
+
+type memInfo struct {
+	total, used, free, avail, cached int64
 }
 
 type mountRow struct {
@@ -112,6 +117,7 @@ type uiModel struct {
 	cores    []float64
 	mounts   []mountRow
 	tempC    int
+	mem      memInfo
 	prevStat map[int][2]uint64 // per-core total/idle counters
 
 	confirm *confirmState
@@ -132,7 +138,7 @@ func (m *uiModel) gatherCmd() tea.Cmd {
 		msg := snapMsg{snap: snap}
 		if m.sshc != nil {
 			out, err := m.sshc.Run(
-				"cat /proc/loadavg /proc/uptime 2>/dev/null; echo @@@; cat /proc/stat; echo @@@; " +
+				"cat /proc/loadavg /proc/uptime 2>/dev/null; echo @@@; cat /proc/stat; echo @@@; cat /proc/meminfo; echo @@@; " +
 					"df -B1 -x tmpfs -x devtmpfs -x overlay --output=target,size,used 2>/dev/null | tail -n +2; echo @@@; " +
 					"cat /sys/class/hwmon/hwmon*/temp1_input 2>/dev/null | sort -rn | head -1")
 			if err == nil {
@@ -164,7 +170,23 @@ func (m *uiModel) gatherCmd() tea.Cmd {
 					msg.cores = m.perCore(parts[1])
 				}
 				if len(parts) > 2 {
-					for _, l := range strings.Split(strings.TrimSpace(parts[2]), "\n") {
+					mi := map[string]int64{}
+					for _, l := range strings.Split(parts[2], "\n") {
+						f := strings.Fields(l)
+						if len(f) >= 2 {
+							var kb int64
+							fmt.Sscanf(f[1], "%d", &kb)
+							mi[strings.TrimSuffix(f[0], ":")] = kb * 1024
+						}
+					}
+					msg.mem = memInfo{
+						total: mi["MemTotal"], free: mi["MemFree"],
+						avail: mi["MemAvailable"], cached: mi["Cached"],
+					}
+					msg.mem.used = msg.mem.total - msg.mem.avail
+				}
+				if len(parts) > 3 {
+					for _, l := range strings.Split(strings.TrimSpace(parts[3]), "\n") {
 						f := strings.Fields(l)
 						if len(f) != 3 {
 							continue
@@ -179,9 +201,9 @@ func (m *uiModel) gatherCmd() tea.Cmd {
 						msg.mounts = append(msg.mounts, mountRow{target: f[0], size: size, used: used})
 					}
 				}
-				if len(parts) > 3 {
+				if len(parts) > 4 {
 					var milli int
-					fmt.Sscanf(strings.TrimSpace(parts[3]), "%d", &milli)
+					fmt.Sscanf(strings.TrimSpace(parts[4]), "%d", &milli)
 					if milli > 1000 {
 						msg.tempC = milli / 1000
 					}
@@ -490,6 +512,9 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if msg.tempC > 0 {
 			m.tempC = msg.tempC
+		}
+		if msg.mem.total > 0 {
+			m.mem = msg.mem
 		}
 		m.err = ""
 		m.rebuildRows()

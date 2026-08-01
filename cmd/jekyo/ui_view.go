@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	reflowtrunc "github.com/muesli/reflow/truncate"
 )
 
 var (
@@ -119,6 +120,52 @@ func (m *uiModel) splash() string {
 
 var sparkBlocks = []rune("▁▂▃▄▅▆▇█")
 
+// brailleGrid is btop's graph texture: cell = left sample x right sample,
+// each quantized to dot heights 0-4.
+var brailleGrid = []rune(" ⢀⢠⢰⢸⡀⣀⣠⣰⣸⡄⣄⣤⣴⣼⡆⣆⣦⣶⣾⡇⣇⣧⣷⣿")
+
+// braille renders vals as a btop-style density graph, two samples per
+// character, scaled to the window's own max.
+func braille(vals []int64, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	need := width * 2
+	if len(vals) > need {
+		vals = vals[len(vals)-need:]
+	}
+	var max int64 = 1
+	for _, v := range vals {
+		if v > max {
+			max = v
+		}
+	}
+	lvl := func(v int64) int {
+		l := int(float64(v)/float64(max)*4 + 0.5)
+		if v > 0 && l == 0 {
+			l = 1
+		}
+		if l > 4 {
+			l = 4
+		}
+		return l
+	}
+	var b strings.Builder
+	pairs := (len(vals) + 1) / 2
+	for i := 0; i < width-pairs; i++ {
+		b.WriteRune(' ')
+	}
+	for i := 0; i < len(vals); i += 2 {
+		l := lvl(vals[i])
+		r := 0
+		if i+1 < len(vals) {
+			r = lvl(vals[i+1])
+		}
+		b.WriteRune(brailleGrid[l*5+r])
+	}
+	return b.String()
+}
+
 // sparkline renders values scaled to their own max into width runes,
 // keeping the most recent samples.
 func sparkline(vals []int64, width int) string {
@@ -166,121 +213,156 @@ func (m *uiModel) View() string {
 	return header + "\n" + body + "\n" + m.viewFooter()
 }
 
-// viewHeader is the btop-style server strip. The box border carries the
-// identity (context, node, pods, uptime) so content rows stay for data:
-// cpu/mem/load on one line, disk/net on the next.
+// viewHeader composes btop-style titled boxes: a cpu box with the core
+// grid, then mem, disks, and net boxes side by side.
 func (m *uiModel) viewHeader() string {
 	w := m.width - 2
-	title := " " + m.ic("server") + " " + m.ctxName
-	if len(m.snap.Nodes) > 0 {
-		n := m.snap.Nodes[0]
-		title += fmt.Sprintf(" · %s · %d pods", n.Name, n.PodCount)
-		if m.uptime != "" {
-			title += " · up " + m.uptime
-		}
-	}
-	title += " "
-
-	var rows []string
+	identity := uiHdrStyle.Render(" " + m.ic("server") + " " + m.ctxName)
 	if len(m.snap.Nodes) == 0 {
-		rows = []string{uiDimStyle.Render("connecting to the cluster...")}
-	} else {
-		n := m.snap.Nodes[0]
-		var cpus, mems, rxs, txs []int64
-		var curRx, curTx float64
-		for _, h := range m.nodeHist {
-			cpus = append(cpus, int64(h.cpuPct*100))
-			mems = append(mems, int64(h.memPct*100))
-			rxs = append(rxs, int64(h.rx))
-			txs = append(txs, int64(h.tx))
-		}
-		if len(m.nodeHist) > 0 {
-			curRx, curTx = m.nodeHist[len(m.nodeHist)-1].rx, m.nodeHist[len(m.nodeHist)-1].tx
-		}
-		gap := "    "
-
-		// summary: total cpu, temperature, load
-		row := fmt.Sprintf("%s %s %5.1f%% %s",
-			uiDimStyle.Render("cpu"), bar(n.CPUPct, 14), n.CPUPct, uiAccent.Render(sparkline(cpus, 14)))
-		if m.tempC > 0 {
-			row += gap + uiDimStyle.Render("temp ") + fmt.Sprintf("%d°C", m.tempC)
-		}
-		if m.load != "" {
-			row += gap + uiDimStyle.Render("load ") + m.load
-		}
-		if n.MetricsMissed {
-			row += "  " + uiRed.Render(m.ic("warn")+" metrics warming up")
-		}
-		rows = append(rows, row)
-
-		// per-core grid, btop-style columns sized to the width
-		if len(m.cores) > 1 {
-			cell := 16 // "C31 ▕██░░░░▏ 99%"
-			ncols := (w - 4) / cell
-			if ncols < 1 {
-				ncols = 1
-			}
-			if ncols > 8 {
-				ncols = 8
-			}
-			nrows := (len(m.cores) + ncols - 1) / ncols
-			for r := 0; r < nrows; r++ {
-				var line strings.Builder
-				for c := 0; c < ncols; c++ {
-					i := c*nrows + r
-					if i >= len(m.cores) {
-						continue
-					}
-					line.WriteString(fmt.Sprintf("%s %s %3.0f%%  ",
-						uiDimStyle.Render(fmt.Sprintf("C%-2d", i)), bar(m.cores[i], 6), m.cores[i]))
-				}
-				rows = append(rows, strings.TrimRight(line.String(), " "))
-			}
-		}
-
-		// memory
-		rows = append(rows, fmt.Sprintf("%s %s %5.1f%% %-17s %s",
-			uiDimStyle.Render("mem"), bar(n.MemPct, 14), n.MemPct,
-			uiDimStyle.Render(fmt.Sprintf("(%s/%s)", fmtMem(n.MemBytes), fmtMem(n.MemCapBytes))),
-			uiGreen.Render(sparkline(mems, 14))))
-
-		// real filesystems, each with its own gauge
-		if len(m.mounts) > 0 {
-			var line strings.Builder
-			for _, mt := range m.mounts {
-				p := pct(mt.used, mt.size)
-				line.WriteString(fmt.Sprintf("%s %s %3.0f%% %s%s",
-					uiDimStyle.Render(fmt.Sprintf("%-9s", truncate(mt.target, 9))), bar(p, 8), p,
-					uiDimStyle.Render(fmt.Sprintf("(%s/%s)", fmtMem(mt.used), fmtMem(mt.size))), gap))
-			}
-			rows = append(rows, uiDimStyle.Render("dsk ")+strings.TrimRight(line.String(), " "))
-		} else {
-			rows = append(rows, fmt.Sprintf("%s %s %5.1f%% %s",
-				uiDimStyle.Render("dsk"), bar(n.DiskPct, 14), n.DiskPct,
-				uiDimStyle.Render(fmt.Sprintf("(%s/%s)", fmtMem(n.DiskUsed), fmtMem(n.DiskCap)))))
-		}
-
-		// network
-		rows = append(rows, fmt.Sprintf("%s ↓ %-8s %s  ↑ %-8s %s",
-			uiDimStyle.Render("net"), fmtRate(curRx), uiAccent.Render(sparkline(rxs, 14)),
-			fmtRate(curTx), uiGreen.Render(sparkline(txs, 14))))
+		return boxWithTitle(identity+" ", "", []string{uiDimStyle.Render("connecting to the cluster...")}, w)
 	}
-	return boxWithTitle(uiHdrStyle.Render(title), rows, w)
+	n := m.snap.Nodes[0]
+	right := uiDimStyle.Render(fmt.Sprintf(" %s · %d pods", n.Name, n.PodCount))
+	if m.uptime != "" {
+		right += uiDimStyle.Render(" · up " + m.uptime)
+	}
+	right += " "
+
+	var cpus, mems, rxs, txs []int64
+	var curRx, curTx float64
+	for _, h := range m.nodeHist {
+		cpus = append(cpus, int64(h.cpuPct*100))
+		mems = append(mems, int64(h.memPct*100))
+		rxs = append(rxs, int64(h.rx))
+		txs = append(txs, int64(h.tx))
+	}
+	if len(m.nodeHist) > 0 {
+		curRx, curTx = m.nodeHist[len(m.nodeHist)-1].rx, m.nodeHist[len(m.nodeHist)-1].tx
+	}
+
+	// cpu box: summary row plus the per-core grid
+	sum := fmt.Sprintf("%s %s %5.1f%%  %s",
+		uiDimStyle.Render("total"), bar(n.CPUPct, 16), n.CPUPct, uiAccent.Render(braille(cpus, 16)))
+	if m.tempC > 0 {
+		sum += fmt.Sprintf("    %s %d°C", uiDimStyle.Render("temp"), m.tempC)
+	}
+	if m.load != "" {
+		sum += "    " + uiDimStyle.Render("load ") + m.load
+	}
+	if n.MetricsMissed {
+		sum += "  " + uiRed.Render(m.ic("warn")+" metrics warming up")
+	}
+	cpuRows := []string{sum}
+	if len(m.cores) > 1 {
+		cell := 16
+		ncols := (w - 4) / cell
+		if ncols < 1 {
+			ncols = 1
+		}
+		if ncols > 8 {
+			ncols = 8
+		}
+		nrows := (len(m.cores) + ncols - 1) / ncols
+		for r := 0; r < nrows; r++ {
+			var line strings.Builder
+			for c := 0; c < ncols; c++ {
+				i := c*nrows + r
+				if i >= len(m.cores) {
+					continue
+				}
+				line.WriteString(fmt.Sprintf("%s %s %3.0f%%  ",
+					uiDimStyle.Render(fmt.Sprintf("C%-2d", i)), bar(m.cores[i], 6), m.cores[i]))
+			}
+			cpuRows = append(cpuRows, strings.TrimRight(line.String(), " "))
+		}
+	}
+	cpuBox := boxWithTitle(btopTitle("¹", "cpu")+uiDimStyle.Render("─· ")+identity+" ", right, cpuRows, w)
+
+	// bottom row: mem, disks, net side by side
+	memW := w * 30 / 100
+	netW := w * 34 / 100
+	dskW := w - memW - netW
+	var memRows []string
+	if m.mem.total > 0 {
+		mr := func(label string, v int64) string {
+			pv := pct(v, m.mem.total)
+			return fmt.Sprintf("%s %8s %s %3.0f%%",
+				uiDimStyle.Render(fmt.Sprintf("%-10s", label+":")), fmtMem(v), bar(pv, memW-30), pv)
+		}
+		memRows = []string{
+			uiDimStyle.Render(fmt.Sprintf("%-10s", "Total:")) + fmt.Sprintf(" %8s ", fmtMem(m.mem.total)) + uiGreen.Render(braille(mems, memW-24)),
+			mr("Used", m.mem.used),
+			mr("Available", m.mem.avail),
+			mr("Cached", m.mem.cached),
+			mr("Free", m.mem.free),
+		}
+	} else {
+		memRows = []string{
+			fmt.Sprintf("%s %5.1f%%", bar(n.MemPct, memW-12), n.MemPct),
+			uiDimStyle.Render(fmt.Sprintf("%s / %s  ", fmtMem(n.MemBytes), fmtMem(n.MemCapBytes))) + uiGreen.Render(sparkline(mems, 10)),
+		}
+	}
+	var dskRows []string
+	if len(m.mounts) > 0 {
+		for _, mt := range m.mounts {
+			pv := pct(mt.used, mt.size)
+			dskRows = append(dskRows,
+				fmt.Sprintf("%s %s", uiHdrStyle.Render(truncateStr(mt.target, 18)), uiDimStyle.Render(fmtMem(mt.size))),
+				fmt.Sprintf("%s %s %3.0f%% %s", uiDimStyle.Render("Used:"), bar(pv, dskW-26), pv, fmtMem(mt.used)))
+		}
+	} else {
+		dskRows = append(dskRows, fmt.Sprintf("%s %5.1f%% %s", bar(n.DiskPct, dskW-18), n.DiskPct,
+			uiDimStyle.Render(fmt.Sprintf("%s/%s", fmtMem(n.DiskUsed), fmtMem(n.DiskCap)))))
+	}
+	netRows := []string{
+		fmt.Sprintf("%s %-9s %s", uiAccent.Render("▼"), fmtRate(curRx), uiAccent.Render(braille(rxs, netW-30))+uiDimStyle.Render(" Total: ")+fmtMem(n.NetRxBytes)),
+		fmt.Sprintf("%s %-9s %s", uiGreen.Render("▲"), fmtRate(curTx), uiGreen.Render(braille(txs, netW-30))+uiDimStyle.Render(" Total: ")+fmtMem(n.NetTxBytes)),
+	}
+	// equal heights so the boxes align
+	rows := len(memRows)
+	if len(dskRows) > rows {
+		rows = len(dskRows)
+	}
+	if len(netRows) > rows {
+		rows = len(netRows)
+	}
+	for len(memRows) < rows {
+		memRows = append(memRows, "")
+	}
+	for len(dskRows) < rows {
+		dskRows = append(dskRows, "")
+	}
+	for len(netRows) < rows {
+		netRows = append(netRows, "")
+	}
+	memBox := boxWithTitle(btopTitle("²", "mem"), "", memRows, memW)
+	dskBox := boxWithTitle(btopTitle("³", "disks"), "", dskRows, dskW)
+	netBox := boxWithTitle(btopTitle("⁴", "net"), "", netRows, netW)
+	return cpuBox + "\n" + lipgloss.JoinHorizontal(lipgloss.Top, memBox, dskBox, netBox)
 }
 
-// boxWithTitle draws a rounded box whose top border embeds the title,
-// btop-style, so the header spends no content row on identity.
-func boxWithTitle(title string, rows []string, w int) string {
+// btopTitle renders a border-fused box label like btop's ¹cpu.
+func btopTitle(sup, label string) string {
+	return uiAccent.Render(sup) + uiHdrStyle.Render(label)
+}
+
+// boxWithTitle draws a rounded box with the title embedded in the top
+// border, btop-style; right lands at the border's right end.
+func boxWithTitle(title, right string, rows []string, w int) string {
 	inner := w - 2
 	tw := lipgloss.Width(title)
-	rest := inner - tw - 1
+	rw := lipgloss.Width(right)
+	rest := inner - tw - rw - 2
 	if rest < 0 {
 		rest = 0
 	}
 	bs := uiDimStyle
 	var b strings.Builder
-	b.WriteString(bs.Render("╭─") + title + bs.Render(strings.Repeat("─", rest)+"╮") + "\n")
+	b.WriteString(bs.Render("╭─") + title + bs.Render(strings.Repeat("─", rest)) + right + bs.Render("─╮") + "\n")
 	for _, r := range rows {
+		if lipgloss.Width(r) > inner-1 {
+			r = reflowtrunc.String(r, uint(inner-1))
+		}
 		pad := inner - lipgloss.Width(r) - 1
 		if pad < 0 {
 			pad = 0
@@ -498,3 +580,6 @@ func (m *uiModel) viewFooter() string {
 	}
 	return line
 }
+
+// truncateStr is truncate with a different name kept for box labels.
+func truncateStr(s string, n int) string { return truncate(s, n) }

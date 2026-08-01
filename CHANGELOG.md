@@ -6,6 +6,16 @@ All notable changes to JEKYO are documented here. The format follows
 may contain breaking changes and patches never do. From 1.0 on, breaking
 changes only land in major versions.
 
+## [0.9.0] - 2026-08-01
+
+### Changed
+
+- The `jekyo ui` header now mirrors btop faithfully: fused superscript
+  box titles, braille density graphs, a mem box built from
+  /proc/meminfo (Total, Used, Available, Cached, Free with meters),
+  disks in two-line-per-filesystem layout, and net with rates plus
+  lifetime totals.
+
 ## [0.8.0] - 2026-08-01
 
 ### Added
