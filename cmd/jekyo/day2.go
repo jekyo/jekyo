@@ -254,9 +254,16 @@ func newLogsCmd() *cobra.Command {
 	var tail int64
 	var timestamps bool
 	cmd := &cobra.Command{
-		Use:   "logs <app>[/<service>]",
-		Short: "Show (or follow) logs for an app or one service",
-		Args:  cobra.ExactArgs(1),
+		Use:   "logs <app>[/<service>[/<container>]]",
+		Short: "Show (or follow) logs for an app, a service, or one container",
+		Long: `Show (or follow) logs.
+
+The target narrows from app to container: "shop" streams every service,
+"shop/web" one service (all its containers, prefixed), and
+"shop/web/proxy" a single sidecar. When the second segment matches no
+service, it is resolved as a container name across the app, so a
+sidecar can be addressed directly as "shop/proxy".`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			appName, seg, containerArg := splitTarget3(args[0])
 			d, err := newDeployer()
@@ -349,7 +356,11 @@ func newAttachCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "attach <app>/<service>[/<container>]",
 		Short: "Attach to the running process of a service (Ctrl+C detaches)",
-		Args:  cobra.ExactArgs(1),
+		Long: `Attach to the running process of a container (Ctrl+C detaches).
+
+The second target segment is a service name, or a sidecar name when no
+service matches; a third segment picks a container explicitly.`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			appName, seg, containerArg := splitTarget3(args[0])
 			if seg == "" {
@@ -420,7 +431,11 @@ func newExecCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "exec <app>/<service>[/<container>] [-- command...]",
 		Short: "Run a command in a service's pod (default: interactive shell)",
-		Args:  cobra.MinimumNArgs(1),
+		Long: `Run a command in a running container (default: an interactive shell).
+
+The second target segment is a service name, or a sidecar name when no
+service matches; a third segment picks a container explicitly.`,
+		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			appName, seg, containerArg := splitTarget3(args[0])
 			if seg == "" {

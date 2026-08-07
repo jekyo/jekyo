@@ -6,6 +6,14 @@ All notable changes to JEKYO are documented here. The format follows
 may contain breaking changes and patches never do. From 1.0 on, breaking
 changes only land in major versions.
 
+## [0.22.2] - 2026-08-08
+
+### Changed
+
+- `logs`, `exec` and `attach` help text documents the full target
+  grammar: three-segment `app/service/container` targets and the
+  `app/sidecar` shorthand.
+
 ## [0.22.1] - 2026-08-08
 
 ### Fixed
