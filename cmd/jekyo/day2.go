@@ -29,7 +29,48 @@ import (
 // splitTarget parses "app" or "app/service".
 func splitTarget(s string) (app, svc string) {
 	app, svc, _ = strings.Cut(s, "/")
+	svc, _, _ = strings.Cut(svc, "/")
 	return app, svc
+}
+
+// splitTarget3 parses "app[/service[/container]]"; the third segment
+// addresses a sidecar or init container (issue #19).
+func splitTarget3(s string) (app, svc, container string) {
+	parts := strings.SplitN(s, "/", 3)
+	app = parts[0]
+	if len(parts) > 1 {
+		svc = parts[1]
+	}
+	if len(parts) > 2 {
+		container = parts[2]
+	}
+	return
+}
+
+// pickContainer resolves which container a command targets: the explicit
+// third segment, else the container named after the service, else the
+// pod's first container. Unknown names error with the available list.
+func pickContainer(pod *corev1.Pod, svc, explicit string) (string, error) {
+	var names []string
+	for _, c := range pod.Spec.Containers {
+		names = append(names, c.Name)
+	}
+	want := explicit
+	if want == "" {
+		want = svc
+	}
+	for _, n := range names {
+		if n == want {
+			return n, nil
+		}
+	}
+	if explicit != "" {
+		return "", fmt.Errorf("no container %q in pod %s (available: %s)", explicit, pod.Name, strings.Join(names, ", "))
+	}
+	if len(names) > 0 {
+		return names[0], nil
+	}
+	return "", fmt.Errorf("pod %s has no containers", pod.Name)
 }
 
 func podSelector(app, svc string) string {
@@ -41,14 +82,21 @@ func podSelector(app, svc string) string {
 }
 
 // podRow is the JSON shape of one `jekyo ps -o json` entry.
-type podRow struct {
-	App      string `json:"app"`
-	Service  string `json:"service"`
-	Pod      string `json:"pod"`
-	Ready    string `json:"ready"`
-	Status   string `json:"status"`
+type containerRow struct {
+	Name     string `json:"name"`
+	Ready    bool   `json:"ready"`
 	Restarts int    `json:"restarts"`
-	AgeSec   int64  `json:"ageSeconds"`
+}
+
+type podRow struct {
+	App        string         `json:"app"`
+	Service    string         `json:"service"`
+	Pod        string         `json:"pod"`
+	Ready      string         `json:"ready"`
+	Status     string         `json:"status"`
+	Restarts   int            `json:"restarts"`
+	AgeSec     int64          `json:"ageSeconds"`
+	Containers []containerRow `json:"containers,omitempty"`
 }
 
 func newPsCmd() *cobra.Command {
@@ -101,11 +149,20 @@ func newPsCmd() *cobra.Command {
 						status = cs.State.Waiting.Reason
 					}
 				}
-				rows = append(rows, podRow{
+				row := podRow{
 					App: p.Labels[compile.LabelApp], Service: p.Labels[compile.LabelService],
 					Pod: p.Name, Ready: fmt.Sprintf("%d/%d", ready, total), Status: status,
 					Restarts: restarts, AgeSec: int64(time.Since(p.CreationTimestamp.Time).Seconds()),
-				})
+				}
+				if total > 1 {
+					for _, cs := range p.Status.ContainerStatuses {
+						if cs.Name == row.Service {
+							continue // the main container is the parent row
+						}
+						row.Containers = append(row.Containers, containerRow{Name: cs.Name, Ready: cs.Ready, Restarts: int(cs.RestartCount)})
+					}
+				}
+				rows = append(rows, row)
 			}
 			if output == "json" {
 				enc := json.NewEncoder(cmd.OutOrStdout())
@@ -118,6 +175,13 @@ func newPsCmd() *cobra.Command {
 				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%d\t%s\n",
 					r.App, r.Service, r.Pod, r.Ready, r.Status, r.Restarts,
 					age(time.Now().Add(-time.Duration(r.AgeSec)*time.Second)))
+				for _, c := range r.Containers {
+					ready := "0/1"
+					if c.Ready {
+						ready = "1/1"
+					}
+					fmt.Fprintf(w, "%s\t └─ %s\t\t%s\t\t%d\t\n", r.App, c.Name, ready, c.Restarts)
+				}
 			}
 			return w.Flush()
 		},
@@ -136,7 +200,7 @@ func newLogsCmd() *cobra.Command {
 		Short: "Show (or follow) logs for an app or one service",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			appName, svc := splitTarget(args[0])
+			appName, svc, container := splitTarget3(args[0])
 			d, err := newDeployer()
 			if err != nil {
 				return err
@@ -163,12 +227,33 @@ func newLogsCmd() *cobra.Command {
 				opts.SinceSeconds = &secs
 			}
 
-			prefix := len(pods.Items) > 1
-			var wg sync.WaitGroup
+			// one stream per container so multi-container pods just work
+			// (issue #19); a third target segment narrows to one container
+			type streamT struct{ label, pod, container string }
+			var streams []streamT
 			for _, p := range pods.Items {
-				rc, err := d.Client.Typed.CoreV1().Pods(compile.NamespaceFor(appName)).GetLogs(p.Name, opts).Stream(ctx)
+				for _, c := range p.Spec.Containers {
+					if container != "" && c.Name != container {
+						continue
+					}
+					label := p.Name
+					if len(p.Spec.Containers) > 1 {
+						label = p.Name + "/" + c.Name
+					}
+					streams = append(streams, streamT{label: label, pod: p.Name, container: c.Name})
+				}
+			}
+			if len(streams) == 0 {
+				return fmt.Errorf("no container %q in the pods of %s/%s", container, appName, svc)
+			}
+			prefix := len(streams) > 1
+			var wg sync.WaitGroup
+			for _, st := range streams {
+				o := *opts
+				o.Container = st.container
+				rc, err := d.Client.Typed.CoreV1().Pods(compile.NamespaceFor(appName)).GetLogs(st.pod, &o).Stream(ctx)
 				if err != nil {
-					fmt.Fprintf(cmd.ErrOrStderr(), "%s: %v\n", p.Name, err)
+					fmt.Fprintf(cmd.ErrOrStderr(), "%s: %v\n", st.label, err)
 					continue
 				}
 				wg.Add(1)
@@ -184,7 +269,7 @@ func newLogsCmd() *cobra.Command {
 							fmt.Fprintln(cmd.OutOrStdout(), sc.Text())
 						}
 					}
-				}(p.Name, rc)
+				}(st.label, rc)
 			}
 			wg.Wait()
 			return nil
@@ -200,13 +285,13 @@ func newLogsCmd() *cobra.Command {
 func newAttachCmd() *cobra.Command {
 	var stdin bool
 	cmd := &cobra.Command{
-		Use:   "attach <app>/<service>",
+		Use:   "attach <app>/<service>[/<container>]",
 		Short: "Attach to the running process of a service (Ctrl+C detaches)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			appName, svc := splitTarget(args[0])
+			appName, svc, containerArg := splitTarget3(args[0])
 			if svc == "" {
-				return fmt.Errorf("target must be <app>/<service>")
+				return fmt.Errorf("target must be <app>/<service>[/<container>]")
 			}
 			d, err := newDeployer()
 			if err != nil {
@@ -228,11 +313,15 @@ func newAttachCmd() *cobra.Command {
 				return fmt.Errorf("no running pod for %s", args[0])
 			}
 
+			attachContainer, err := pickContainer(pod, svc, containerArg)
+			if err != nil {
+				return err
+			}
 			tty := stdin && term.IsTerminal(int(os.Stdin.Fd()))
 			req := d.Client.Typed.CoreV1().RESTClient().Post().
 				Resource("pods").Namespace(compile.NamespaceFor(appName)).Name(pod.Name).SubResource("attach").
 				VersionedParams(&corev1.PodAttachOptions{
-					Container: svc,
+					Container: attachContainer,
 					Stdin:     stdin,
 					Stdout:    true,
 					Stderr:    true,
@@ -263,13 +352,13 @@ func newAttachCmd() *cobra.Command {
 
 func newExecCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "exec <app>/<service> [-- command...]",
+		Use:   "exec <app>/<service>[/<container>] [-- command...]",
 		Short: "Run a command in a service's pod (default: interactive shell)",
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			appName, svc := splitTarget(args[0])
+			appName, svc, containerArg := splitTarget3(args[0])
 			if svc == "" {
-				return fmt.Errorf("target must be <app>/<service>")
+				return fmt.Errorf("target must be <app>/<service>[/<container>]")
 			}
 			command := args[1:]
 			if len(command) == 0 {
@@ -295,11 +384,15 @@ func newExecCmd() *cobra.Command {
 				return fmt.Errorf("no running pod for %s", args[0])
 			}
 
+			execContainer, err := pickContainer(pod, svc, containerArg)
+			if err != nil {
+				return err
+			}
 			interactive := term.IsTerminal(int(os.Stdin.Fd()))
 			req := d.Client.Typed.CoreV1().RESTClient().Post().
 				Resource("pods").Namespace(compile.NamespaceFor(appName)).Name(pod.Name).SubResource("exec").
 				VersionedParams(&corev1.PodExecOptions{
-					Container: svc,
+					Container: execContainer,
 					Command:   command,
 					Stdin:     interactive,
 					Stdout:    true,

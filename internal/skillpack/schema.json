@@ -405,11 +405,12 @@
               },
               "volumes": {
                 "type": "object"
+              },
+              "build": {
+                "type": "object",
+                "description": "Build the sidecar from the repo, same block as services."
               }
             },
-            "required": [
-              "image"
-            ],
             "additionalProperties": false
           }
         },

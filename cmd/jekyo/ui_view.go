@@ -577,6 +577,38 @@ func (m *uiModel) viewTree(w, h int) string {
 				lines++
 			}
 			b.WriteString(uiHdrStyle.Render(m.ic("app")+" "+r.app) + "\n")
+		} else if r.container != "" {
+			// sidecar sub-row with per-container stats
+			var tc topContainer
+			for _, pp := range m.snap.Pods {
+				if pp.App == r.app && pp.Service == r.service {
+					for _, c := range pp.Containers {
+						if c.Name == r.container {
+							tc = c
+						}
+					}
+				}
+			}
+			dot := uiGreen.Render("●")
+			if !tc.Ready {
+				dot = uiRed.Render("●")
+			}
+			rst := uiDimStyle.Render(fmt.Sprintf("%3d", tc.Restarts))
+			if tc.Restarts > 0 {
+				rst = uiAccent.Render(fmt.Sprintf("%3d", tc.Restarts))
+			}
+			body := fmt.Sprintf("%-14s %6s %7s %s ", truncate("└─ "+r.container, 14), fmtCPU(tc.CPUMilli), fmtMem(tc.MemBytes), rst)
+			pad := inner - lipgloss.Width(body) - 4
+			if pad > 0 {
+				body += strings.Repeat(" ", pad)
+			}
+			if i == m.cursor {
+				b.WriteString(uiKey.Render("❯") + " " + dot + " " + uiSelStyle.Render(body) + "\n")
+			} else {
+				b.WriteString("  " + dot + " " + uiDimStyle.Render(body) + "\n")
+			}
+			lines++
+			continue
 		} else {
 			p := byKey[r.app+"/"+r.service]
 			dot := uiGreen.Render("●")

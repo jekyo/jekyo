@@ -90,9 +90,10 @@ type latestMsg struct{ tag string }
 
 // uiRow is one line of the left pane tree.
 type uiRow struct {
-	app     string
-	service string // empty for app header rows
-	header  bool
+	app       string
+	service   string // empty for app header rows
+	container string // set for sidecar sub-rows
+	header    bool
 }
 
 type histPt struct {
@@ -530,10 +531,24 @@ func (m *uiModel) selected() (app, svc string, ok bool) {
 	return "", "", false
 }
 
+// selectedTarget is the full app/service[/container] the row addresses.
+func (m *uiModel) selectedTarget() (string, bool) {
+	if m.cursor < 0 || m.cursor >= len(m.rows) || m.rows[m.cursor].header {
+		return "", false
+	}
+	r := m.rows[m.cursor]
+	t := r.app + "/" + r.service
+	if r.container != "" {
+		t += "/" + r.container
+	}
+	return t, true
+}
+
 func (m *uiModel) rebuildRows() {
 	sel, selSvc, hadSel := m.selected()
 	byApp := map[string][]string{}
 	seen := map[string]bool{}
+	sidecars := map[string][]string{}
 	for _, p := range m.snap.Pods {
 		if p.Service == "" {
 			continue // job pods without a service have no tree row
@@ -542,6 +557,11 @@ func (m *uiModel) rebuildRows() {
 		if !seen[k] {
 			seen[k] = true
 			byApp[p.App] = append(byApp[p.App], p.Service)
+			for _, c := range p.Containers {
+				if c.Name != p.Service {
+					sidecars[k] = append(sidecars[k], c.Name)
+				}
+			}
 		}
 	}
 	apps := make([]string, 0, len(byApp))
@@ -555,6 +575,9 @@ func (m *uiModel) rebuildRows() {
 		sort.Strings(byApp[a])
 		for _, s := range byApp[a] {
 			m.rows = append(m.rows, uiRow{app: a, service: s})
+			for _, c := range sidecars[a+"/"+s] {
+				m.rows = append(m.rows, uiRow{app: a, service: s, container: c})
+			}
 		}
 	}
 	// keep the selection stable across refreshes
@@ -801,12 +824,12 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case "e":
-			if app, svc, ok := m.selected(); ok {
-				return m, execSelf("exec", app+"/"+svc)
+			if t, ok := m.selectedTarget(); ok {
+				return m, execSelf("exec", t)
 			}
 		case "a":
-			if app, svc, ok := m.selected(); ok {
-				return m, execSelf("attach", app+"/"+svc)
+			if t, ok := m.selectedTarget(); ok {
+				return m, execSelf("attach", t)
 			}
 		}
 	}

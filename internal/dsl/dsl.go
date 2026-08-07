@@ -206,6 +206,7 @@ type Init struct {
 // Sidecar is an extra container in the service's pod.
 type Sidecar struct {
 	Image     string                 `yaml:"image"`
+	Build     *Build                 `yaml:"build"`
 	Command   []string               `yaml:"command"`
 	Args      []string               `yaml:"args"`
 	Env       map[string]string      `yaml:"env"`

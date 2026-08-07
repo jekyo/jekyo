@@ -54,61 +54,88 @@ type Result struct {
 // registry doesn't have yet, then rewrites those services to image:
 // references. baseDir anchors relative build contexts (the jekyo.yaml dir).
 func EnsureAll(app *dsl.App, baseDir string, env Env, log io.Writer) ([]Result, error) {
-	var names []string
+	// build units cover services and their sidecars (issue #18); sidecar
+	// images are tagged <app>/<service>-<sidecar>
+	type unit struct {
+		name  string
+		build *dsl.Build
+		set   func(ref string)
+	}
+	var units []unit
 	for name, svc := range app.Services {
+		name, svc := name, svc
 		if svc.Build != nil {
-			names = append(names, name)
+			units = append(units, unit{name: name, build: svc.Build, set: func(ref string) {
+				s := app.Services[name]
+				s.Image = ref
+				s.Build = nil
+				app.Services[name] = s
+			}})
+		}
+		for scName, sc := range svc.Sidecars {
+			scName, sc := scName, sc
+			if sc.Build != nil {
+				units = append(units, unit{name: name + "-" + scName, build: sc.Build, set: func(ref string) {
+					parent := app.Services[name]
+					side := parent.Sidecars[scName]
+					side.Image = ref
+					side.Build = nil
+					parent.Sidecars[scName] = side
+					app.Services[name] = parent
+				}})
+			}
 		}
 	}
-	if len(names) == 0 {
+	if len(units) == 0 {
 		return nil, nil
 	}
-	sort.Strings(names)
+	sort.Slice(units, func(i, j int) bool { return units[i].name < units[j].name })
 
 	if _, err := exec.LookPath("docker"); err != nil {
+		var names []string
+		for _, u := range units {
+			names = append(names, u.name)
+		}
 		return nil, fmt.Errorf("docker is required to build images (services: %s)", strings.Join(names, ", "))
 	}
 
 	var results []Result
-	for _, name := range names {
-		svc := app.Services[name]
-		repo := app.Name + "/" + name
-		tag, err := contentHash(baseDir, svc.Build, env.Platform)
+	for _, u := range units {
+		repo := app.Name + "/" + u.name
+		tag, err := contentHash(baseDir, u.build, env.Platform)
 		if err != nil {
-			return nil, fmt.Errorf("service %s: %w", name, err)
+			return nil, fmt.Errorf("service %s: %w", u.name, err)
 		}
 		ref := addons.RegistryHost + "/" + repo + ":" + tag
 
 		exists, err := env.Registry.HasTag(repo, tag)
 		if err != nil {
-			return nil, fmt.Errorf("service %s: checking registry: %w", name, err)
+			return nil, fmt.Errorf("service %s: checking registry: %w", u.name, err)
 		}
 		if exists {
-			fmt.Fprintf(log, "→ %s: unchanged (%s), skipping build\n", name, tag)
+			fmt.Fprintf(log, "→ %s: unchanged (%s), skipping build\n", u.name, tag)
 		} else {
-			fmt.Fprintf(log, "→ building %s (%s, %s)\n", name, tag, env.Platform)
-			tarPath, err := buildx(baseDir, svc.Build, env.Platform, ref, log)
+			fmt.Fprintf(log, "→ building %s (%s, %s)\n", u.name, tag, env.Platform)
+			tarPath, err := buildx(baseDir, u.build, env.Platform, ref, log)
 			if err != nil {
-				return nil, fmt.Errorf("service %s: %w", name, err)
+				return nil, fmt.Errorf("service %s: %w", u.name, err)
 			}
 			f, err := os.Open(tarPath)
 			if err != nil {
 				return nil, err
 			}
 			st, _ := f.Stat()
-			fmt.Fprintf(log, "→ shipping %s to cluster (%d MB)\n", name, st.Size()/1024/1024)
+			fmt.Fprintf(log, "→ shipping %s to cluster (%d MB)\n", u.name, st.Size()/1024/1024)
 			err = env.Deliver(ref, f, st.Size())
 			f.Close()
 			os.Remove(tarPath)
 			if err != nil {
-				return nil, fmt.Errorf("service %s: delivering image: %w", name, err)
+				return nil, fmt.Errorf("service %s: delivering image: %w", u.name, err)
 			}
 		}
 
-		svc.Image = ref
-		svc.Build = nil
-		app.Services[name] = svc
-		results = append(results, Result{Service: name, Image: ref, Reused: exists})
+		u.set(ref)
+		results = append(results, Result{Service: u.name, Image: ref, Reused: exists})
 	}
 	return results, nil
 }

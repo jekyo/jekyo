@@ -48,6 +48,17 @@ type topPod struct {
 	// cumulative since pod start; diff two snapshots for rates
 	NetRxBytes int64 `json:"networkRxBytes,omitempty"`
 	NetTxBytes int64 `json:"networkTxBytes,omitempty"`
+	// Containers breaks the pod down when it has more than one (sidecars);
+	// the entry named after the service is the main container (issue #19)
+	Containers []topContainer `json:"containers,omitempty"`
+}
+
+type topContainer struct {
+	Name     string `json:"name"`
+	Ready    bool   `json:"ready"`
+	Restarts int    `json:"restarts"`
+	CPUMilli int64  `json:"cpuMillicores"`
+	MemBytes int64  `json:"memoryBytes"`
 }
 
 type topBackup struct {
@@ -205,14 +216,17 @@ func gatherTop(ctx context.Context, d *deploy.Deployer, contextName, app string)
 	// usage by namespace/pod; metrics lag pod creation by up to a scrape
 	// interval, so missing entries render as zero rather than failing.
 	usage := map[string][2]int64{}
+	perContainer := map[string][]topContainer{}
 	metricsOK := true
 	pm, err := d.Client.Dynamic.Resource(podMetricsGVR).Namespace(ns).List(ctx, metav1.ListOptions{LabelSelector: sel})
 	if err != nil {
 		metricsOK = false
 	} else {
 		for _, item := range pm.Items {
+			key := item.GetNamespace() + "/" + item.GetName()
 			cpu, mem := sumContainerUsage(item)
-			usage[item.GetNamespace()+"/"+item.GetName()] = [2]int64{cpu, mem}
+			usage[key] = [2]int64{cpu, mem}
+			perContainer[key] = containerUsage(item)
 		}
 	}
 
@@ -357,6 +371,20 @@ func gatherTop(ctx context.Context, d *deploy.Deployer, contextName, app string)
 		if limMem > 0 {
 			row.MemPct = 100 * float64(u[1]) / float64(limMem)
 		}
+		if len(p.Spec.Containers) > 1 {
+			metrics := map[string]topContainer{}
+			for _, cu := range perContainer[p.Namespace+"/"+p.Name] {
+				metrics[cu.Name] = cu
+			}
+			for _, cs := range p.Status.ContainerStatuses {
+				tc := metrics[cs.Name]
+				tc.Name = cs.Name
+				tc.Ready = cs.Ready
+				tc.Restarts = int(cs.RestartCount)
+				row.Containers = append(row.Containers, tc)
+			}
+			sort.Slice(row.Containers, func(i, j int) bool { return row.Containers[i].Name < row.Containers[j].Name })
+		}
 		snap.Pods = append(snap.Pods, row)
 	}
 	sort.Slice(snap.Pods, func(i, j int) bool {
@@ -426,17 +454,27 @@ func gatherTop(ctx context.Context, d *deploy.Deployer, contextName, app string)
 }
 
 func sumContainerUsage(item unstructured.Unstructured) (cpuMilli, memBytes int64) {
+	for _, u := range containerUsage(item) {
+		cpuMilli += u.CPUMilli
+		memBytes += u.MemBytes
+	}
+	return
+}
+
+// containerUsage lists per-container cpu/mem from a pod metrics item.
+func containerUsage(item unstructured.Unstructured) []topContainer {
+	var out []topContainer
 	containers, _, _ := unstructured.NestedSlice(item.Object, "containers")
 	for _, c := range containers {
 		m, ok := c.(map[string]any)
 		if !ok {
 			continue
 		}
+		name, _ := m["name"].(string)
 		cpu, mem := parseUsage(m["usage"])
-		cpuMilli += cpu
-		memBytes += mem
+		out = append(out, topContainer{Name: name, CPUMilli: cpu, MemBytes: mem})
 	}
-	return
+	return out
 }
 
 func parseUsage(v any) (cpuMilli, memBytes int64) {

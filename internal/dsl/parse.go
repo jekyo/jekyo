@@ -259,8 +259,8 @@ func validate(app *App) error {
 			if !nameRe.MatchString(scName) {
 				bad("%s: sidecar %s: name must be lowercase alphanumeric/dashes", p, scName)
 			}
-			if sc.Image == "" {
-				bad("%s: sidecar %s: image is required", p, scName)
+			if (sc.Image == "") == (sc.Build == nil) {
+				bad("%s: sidecar %s: needs exactly one of image: or build:", p, scName)
 			}
 			for vol := range sc.Volumes {
 				if _, ok := svc.Volumes[vol]; !ok {

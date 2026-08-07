@@ -250,8 +250,15 @@ func newRenderCmd() *cobra.Command {
 				if svc.Build != nil {
 					svc.Image = addons.RegistryHost + "/" + app.Name + "/" + name + ":<content-hash>"
 					svc.Build = nil
-					app.Services[name] = svc
 				}
+				for scName, sc := range svc.Sidecars {
+					if sc.Build != nil {
+						sc.Image = addons.RegistryHost + "/" + app.Name + "/" + name + "-" + scName + ":<content-hash>"
+						sc.Build = nil
+						svc.Sidecars[scName] = sc
+					}
+				}
+				app.Services[name] = svc
 			}
 			objs, err := compile.Compile(app, opts)
 			if err != nil {

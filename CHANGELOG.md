@@ -6,6 +6,20 @@ All notable changes to JEKYO are documented here. The format follows
 may contain breaking changes and patches never do. From 1.0 on, breaking
 changes only land in major versions.
 
+## [0.21.0] - 2026-08-07
+
+### Added
+
+- Sidecars accept `build:` exactly like services do; images are tagged
+  `<app>/<service>-<sidecar>` through the same content-hash pipeline,
+  so `jekyo up` deploys what is in the repo again (#18).
+- Sidecars are first-class in the CLI: `app/service/container` targets
+  work in `logs`, `exec` and `attach`; multi-container `logs` streams
+  every container with a prefix instead of erroring; `jekyo ps` lists
+  sidecars indented under their parent; `jekyo top --json` breaks pods
+  down per container; the ui tree shows sidecar rows with their own
+  cpu, memory and restarts (#19).
+
 ## [0.20.1] - 2026-08-07
 
 ### Added

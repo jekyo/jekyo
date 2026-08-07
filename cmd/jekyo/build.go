@@ -74,6 +74,11 @@ func ensureBuilt(cmd *cobra.Command, app *dsl.App, file string, m contexts.Meta)
 		if svc.Build != nil {
 			hasBuilds = true
 		}
+		for _, sc := range svc.Sidecars {
+			if sc.Build != nil {
+				hasBuilds = true
+			}
+		}
 	}
 	if !hasBuilds {
 		return nil

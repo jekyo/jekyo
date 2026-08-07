@@ -66,7 +66,7 @@ services:               # required, at least one
         command: ["app", "migrate"]     # inherits env/secrets/volumes; image: overrides
     sidecars:                 # extra containers in the same pod
       exporter:
-        image: prom/exporter
+        image: prom/exporter  # or build: (same block services accept)
         port: 9100
         volumes: {data: /data}          # same claim, same pod
     stop-grace: 120           # terminationGracePeriodSeconds
@@ -167,9 +167,9 @@ restore tools (pg_dump, mysqldump, redis SAVE) over raw file copies.
 jekyo render [-f file]         # ALWAYS check generated Kubernetes YAML before deploying
 jekyo up [-f file] [--env-file .env]
 jekyo ls | ps [app] | status <app>       # -o json on list commands
-jekyo logs <app>[/<service>] [-f] [-t] [--since 1h] [--tail N]   # -t prefixes timestamps
-jekyo exec <app>/<service> -- <cmd>
-jekyo attach <app>/<service>   # stream the main process output; Ctrl+C detaches
+jekyo logs <app>[/<service>[/<container>]] [-f] [-t] [--since 1h] [--tail N]   # third segment = a sidecar; multi-container pods stream all, prefixed
+jekyo exec <app>/<service>[/<container>] -- <cmd>
+jekyo attach <app>/<service>[/<container>]   # stream the main process output; Ctrl+C detaches
 jekyo top [app] --json         # snapshot: per-pod cpu/mem/network/restarts, node cpu/mem/disk, volume usage; ALWAYS pass --json (network counters are cumulative; diff two snapshots for rates)
 jekyo ui                       # interactive TUI for humans; agents must NOT run this (use the --json commands)
 jekyo restart <app>[/<service>]
