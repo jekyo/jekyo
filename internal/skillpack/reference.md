@@ -64,11 +64,14 @@ services:               # required, at least one
     init:                     # run-to-completion before the service starts
       migrate:
         command: ["app", "migrate"]     # inherits env/secrets/volumes; image: overrides
+        caps: [NET_ADMIN]               # per-container caps/security override the
+        security: {run-as: 0}           # service's: privileged setup exits, the workload stays unprivileged
     sidecars:                 # extra containers in the same pod
       exporter:
         image: prom/exporter  # or build: (same block services accept)
         port: 9100
         volumes: {data: /data}          # same claim, same pod
+        caps: [NET_RAW]                 # sidecars carry their own caps/security too
     stop-grace: 120           # terminationGracePeriodSeconds
     shm: 1Gi                  # size /dev/shm (browser workloads)
     caps: [NET_ADMIN]         # extra Linux capabilities

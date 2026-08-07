@@ -201,6 +201,11 @@ type Init struct {
 	Command []string          `yaml:"command"`
 	Args    []string          `yaml:"args"`
 	Env     map[string]string `yaml:"env"`
+	// Caps and Security override the service's for this container only;
+	// privileged setup runs here and exits, the workload stays unprivileged
+	// (issue #20).
+	Caps     []string  `yaml:"caps"`
+	Security *Security `yaml:"security"`
 }
 
 // Sidecar is an extra container in the service's pod.
@@ -214,6 +219,9 @@ type Sidecar struct {
 	Ports     []int                  `yaml:"ports"`
 	Resources Resources              `yaml:"resources"`
 	Volumes   map[string]VolumeMount `yaml:"volumes"`
+	// Caps and Security are this sidecar's own (issue #20).
+	Caps     []string  `yaml:"caps"`
+	Security *Security `yaml:"security"`
 }
 
 // AllPorts is the sidecar's deduplicated port list.

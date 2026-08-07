@@ -6,6 +6,17 @@ All notable changes to JEKYO are documented here. The format follows
 may contain breaking changes and patches never do. From 1.0 on, breaking
 changes only land in major versions.
 
+## [0.22.0] - 2026-08-07
+
+### Added
+
+- `caps:` and `security:` per init container and per sidecar, overriding
+  the service-level values. The Kubernetes pattern this unlocks: do the
+  privileged setup (NET_ADMIN as root) in an init container that exits,
+  and run the workload unprivileged and non-root. This also sidesteps
+  the execve capability drop that makes service-level caps unusable for
+  shelled-out commands under a non-root run-as (#20).
+
 ## [0.21.0] - 2026-08-07
 
 ### Added

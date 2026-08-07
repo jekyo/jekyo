@@ -472,6 +472,7 @@ func workload(app *dsl.App, name string, svc dsl.Service, withPullSecret bool, s
 			img = svc.Image
 		}
 		initC := corev1.Container{Name: "init-" + iname, Image: img, Command: ic.Command, Args: ic.Args}
+		initC.SecurityContext = securityContext(ic.Caps, ic.Security)
 		initC.Env = append(initC.Env, podSpec.Containers[0].Env...)
 		for _, k := range sortedKeys(ic.Env) {
 			initC.Env = append(initC.Env, corev1.EnvVar{Name: k, Value: ic.Env[k]})
@@ -482,6 +483,7 @@ func workload(app *dsl.App, name string, svc dsl.Service, withPullSecret bool, s
 	for _, scName := range sortedKeys(svc.Sidecars) {
 		sc := svc.Sidecars[scName]
 		side := corev1.Container{Name: scName, Image: sc.Image, Command: sc.Command, Args: sc.Args}
+		side.SecurityContext = securityContext(sc.Caps, sc.Security)
 		for _, k := range sortedKeys(sc.Env) {
 			side.Env = append(side.Env, corev1.EnvVar{Name: k, Value: sc.Env[k]})
 		}
@@ -642,29 +644,7 @@ func container(name string, svc dsl.Service) (*corev1.Container, error) {
 		}
 		c.Ports = append(c.Ports, cp)
 	}
-	if len(svc.Caps) > 0 || svc.Security != nil {
-		sc := &corev1.SecurityContext{}
-		if len(svc.Caps) > 0 {
-			var caps []corev1.Capability
-			for _, cap := range svc.Caps {
-				caps = append(caps, corev1.Capability(cap))
-			}
-			sc.Capabilities = &corev1.Capabilities{Add: caps}
-		}
-		if sec := svc.Security; sec != nil {
-			sc.RunAsUser = sec.RunAs
-			if sec.ReadOnlyRoot {
-				t := true
-				sc.ReadOnlyRootFilesystem = &t
-			}
-			if sec.NoNewPrivileges != nil {
-				f := !*sec.NoNewPrivileges
-				sc.AllowPrivilegeEscalation = &f
-			}
-			sc.SeccompProfile = &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault}
-		}
-		c.SecurityContext = sc
-	}
+	c.SecurityContext = securityContext(svc.Caps, svc.Security)
 
 	if svc.GPU.Enabled() {
 		devices := svc.GPU.Devices
@@ -703,6 +683,35 @@ func container(name string, svc dsl.Service) (*corev1.Container, error) {
 		c.LivenessProbe = &corev1.Probe{ProbeHandler: handler, PeriodSeconds: 10, FailureThreshold: 3}
 	}
 	return c, nil
+}
+
+// securityContext renders caps and security into a container security
+// context; nil when neither is set.
+func securityContext(caps []string, sec *dsl.Security) *corev1.SecurityContext {
+	if len(caps) == 0 && sec == nil {
+		return nil
+	}
+	sc := &corev1.SecurityContext{}
+	if len(caps) > 0 {
+		var add []corev1.Capability
+		for _, c := range caps {
+			add = append(add, corev1.Capability(c))
+		}
+		sc.Capabilities = &corev1.Capabilities{Add: add}
+	}
+	if sec != nil {
+		sc.RunAsUser = sec.RunAs
+		if sec.ReadOnlyRoot {
+			t := true
+			sc.ReadOnlyRootFilesystem = &t
+		}
+		if sec.NoNewPrivileges != nil {
+			f := !*sec.NoNewPrivileges
+			sc.AllowPrivilegeEscalation = &f
+		}
+		sc.SeccompProfile = &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault}
+	}
+	return sc
 }
 
 // secretsName is the per-service Secret carrying secrets: env values.
