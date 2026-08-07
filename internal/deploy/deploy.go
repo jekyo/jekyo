@@ -189,6 +189,9 @@ func (d *Deployer) List(ctx context.Context) ([]AppInfo, error) {
 		}
 		seen := map[string]bool{}
 		for _, p := range pods.Items {
+			if p.Status.Phase == corev1.PodSucceeded {
+				continue // completed job pods (backups, crons) are not app pods
+			}
 			info.PodsTotal++
 			if isReady(p) {
 				info.PodsReady++

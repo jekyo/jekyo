@@ -236,8 +236,10 @@ func backupCronJob(app *dsl.App, volName string, isShared bool) *batchv1.CronJob
 		TypeMeta:   metav1.TypeMeta{APIVersion: "batch/v1", Kind: "CronJob"},
 		ObjectMeta: metav1.ObjectMeta{Name: "backup-" + volName, Namespace: NamespaceFor(app.Name), Labels: l},
 		Spec: batchv1.CronJobSpec{
-			Schedule:          b.Schedule,
-			ConcurrencyPolicy: batchv1.ForbidConcurrent,
+			Schedule:                   b.Schedule,
+			ConcurrencyPolicy:          batchv1.ForbidConcurrent,
+			SuccessfulJobsHistoryLimit: ptrInt32(1),
+			FailedJobsHistoryLimit:     ptrInt32(2),
 			JobTemplate: batchv1.JobTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{Labels: l},
 				Spec: batchv1.JobSpec{
@@ -322,8 +324,10 @@ func workload(app *dsl.App, name string, svc dsl.Service, withPullSecret bool, s
 			TypeMeta:   metav1.TypeMeta{APIVersion: "batch/v1", Kind: "CronJob"},
 			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: NamespaceFor(app.Name), Labels: labels(app, name)},
 			Spec: batchv1.CronJobSpec{
-				Schedule:          svc.Schedule,
-				ConcurrencyPolicy: batchv1.ForbidConcurrent,
+				Schedule:                   svc.Schedule,
+				ConcurrencyPolicy:          batchv1.ForbidConcurrent,
+				SuccessfulJobsHistoryLimit: ptrInt32(1),
+				FailedJobsHistoryLimit:     ptrInt32(2),
 				JobTemplate: batchv1.JobTemplateSpec{
 					ObjectMeta: metav1.ObjectMeta{Labels: labels(app, name)},
 					Spec: batchv1.JobSpec{
@@ -641,6 +645,8 @@ func mergeLabels(a, b map[string]string) map[string]string {
 	}
 	return out
 }
+
+func ptrInt32(v int32) *int32 { return &v }
 
 func portName(p int) string { return "p" + strconv.Itoa(p) }
 

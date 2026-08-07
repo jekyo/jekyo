@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -115,6 +116,18 @@ func newUpdateCmd() *cobra.Command {
 				return fmt.Errorf("%w\nre-run with sudo: sudo jekyo update", err)
 			}
 			cmd.Printf("Updated. %s is now %s.\n", self, tag)
+
+			// a stale skill misleads agents; refresh it when installed
+			if home, err := os.UserHomeDir(); err == nil {
+				if _, err := os.Stat(filepath.Join(home, ".claude", "skills", "jekyo")); err == nil {
+					refresh := exec.Command(self, "skill", "install", "--global")
+					if out, err := refresh.CombinedOutput(); err == nil {
+						cmd.Println("Agent skill refreshed for the new version.")
+					} else {
+						cmd.Printf("Skill refresh failed (%v): run jekyo skill install --global\n%s", err, out)
+					}
+				}
+			}
 			return nil
 		},
 	}

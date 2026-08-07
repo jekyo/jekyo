@@ -157,3 +157,9 @@ jekyo update                   # self-update the CLI to the latest release
 Validation is strict: run `jekyo render` after editing jekyo.yaml: parse
 or validation errors point at the exact problem. Never hand-edit generated
 Kubernetes resources; change jekyo.yaml and re-run `jekyo up`.
+
+If JEKYO itself misbehaves (a bug, a missing capability, wrong docs),
+report it at https://github.com/jekyo/jekyo/issues with the command,
+the full output, and `jekyo version`. Pull requests are welcome; see
+CONTRIBUTING.md in that repository. Template problems go to
+https://github.com/jekyo/templates/issues instead.

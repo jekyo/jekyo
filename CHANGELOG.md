@@ -6,6 +6,25 @@ All notable changes to JEKYO are documented here. The format follows
 may contain breaking changes and patches never do. From 1.0 on, breaking
 changes only land in major versions.
 
+## [0.19.0] - 2026-08-07
+
+### Added
+
+- `jekyo context add <user@host>`: adopt a server that already runs
+  JEKYO from any machine. Everything a context needs (IP, domain,
+  storage path, registry credentials, kubeconfig) is discovered from
+  the server itself; no export blob required. The VPN admin password is
+  the one thing that cannot be recovered.
+- `jekyo update` refreshes the globally installed agent skill after
+  updating, so agents never operate on stale docs.
+- The skill tells agents where to file JEKYO bugs and pull requests.
+
+### Fixed
+
+- Completed backup job pods no longer deflate the ready count in
+  `jekyo ls`; backup CronJobs keep one successful and two failed jobs
+  of history instead of piling up.
+
 ## [0.18.1] - 2026-08-01
 
 ### Fixed
