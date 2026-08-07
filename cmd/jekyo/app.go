@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	corev1 "k8s.io/api/core/v1"
 
 	"github.com/jekyo/jekyo/internal/addons"
 	"github.com/jekyo/jekyo/internal/compile"
@@ -255,6 +256,17 @@ func newRenderCmd() *cobra.Command {
 			objs, err := compile.Compile(app, opts)
 			if err != nil {
 				return err
+			}
+			// render output gets pasted into issues and chat; secret
+			// values must never ride along (issue #1)
+			for _, obj := range objs {
+				if sec, ok := obj.(*corev1.Secret); ok {
+					if strings.HasSuffix(sec.Name, "-secrets") || strings.HasSuffix(sec.Name, "-files-secret") {
+						for k := range sec.StringData {
+							sec.StringData[k] = "«redacted»"
+						}
+					}
+				}
 			}
 			out, err := deploy.RenderYAML(objs)
 			if err != nil {

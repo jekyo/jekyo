@@ -2,7 +2,9 @@ package dsl
 
 import (
 	"fmt"
+	"net"
 	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -33,6 +35,33 @@ func Parse(data []byte, env map[string]string) (*App, error) {
 			}
 			svc.Env[k] = iv
 		}
+		for k, v := range svc.Secrets {
+			iv, err := interpolate(v, env)
+			if err != nil {
+				return nil, fmt.Errorf("service %s: secrets %s: %w", name, k, err)
+			}
+			svc.Secrets[k] = iv
+		}
+		for path, f := range svc.Files {
+			if f.From != "" {
+				iv, err := interpolate(f.From, env)
+				if err != nil {
+					return nil, fmt.Errorf("service %s: files %s: %w", name, path, err)
+				}
+				f.Content = iv
+				svc.Files[path] = f
+			}
+		}
+		for iname, ic := range svc.Init {
+			for k, v := range ic.Env {
+				iv, err := interpolate(v, env)
+				if err != nil {
+					return nil, fmt.Errorf("service %s: init %s env %s: %w", name, iname, k, err)
+				}
+				ic.Env[k] = iv
+			}
+			_ = iname
+		}
 	}
 	if err := validate(&app); err != nil {
 		return nil, err
@@ -56,7 +85,35 @@ func ParseFile(path string, extraEnv map[string]string) (*App, error) {
 	for k, v := range extraEnv {
 		env[k] = v
 	}
-	return Parse(data, env)
+	app, err := Parse(data, env)
+	if err != nil {
+		return nil, err
+	}
+	base := filepath.Dir(path)
+	for name, svc := range app.Services {
+		// render is the validation gate; a missing dockerfile must fail
+		// here, not at jekyo up (issue #17)
+		if svc.Build != nil && svc.Build.Dockerfile != "" {
+			df := filepath.Join(base, svc.Build.Context, svc.Build.Dockerfile)
+			if svc.Build.Context == "" {
+				df = filepath.Join(base, svc.Build.Dockerfile)
+			}
+			if _, err := os.Stat(df); err != nil {
+				return nil, fmt.Errorf("service %s: build.dockerfile %q not found at %s", name, svc.Build.Dockerfile, df)
+			}
+		}
+		for mount, f := range svc.Files {
+			if f.Path != "" {
+				content, err := os.ReadFile(filepath.Join(base, f.Path))
+				if err != nil {
+					return nil, fmt.Errorf("service %s: files %s: %w", name, mount, err)
+				}
+				f.Content = string(content)
+				svc.Files[mount] = f
+			}
+		}
+	}
+	return app, nil
 }
 
 var interpRe = regexp.MustCompile(`\$\$|\$\{([A-Za-z_][A-Za-z0-9_]*)\}`)
@@ -182,6 +239,70 @@ func validate(app *App) error {
 				bad("%s: volume %s needs a mount path", p, vol)
 			}
 		}
+		for mount, f := range svc.Files {
+			if !strings.HasPrefix(mount, "/") {
+				bad("%s: files key %q must be an absolute mount path", p, mount)
+			}
+			if (f.Path == "") == (f.From == "") {
+				bad("%s: files %s needs exactly one of a local path or from:", p, mount)
+			}
+		}
+		for iname, ic := range svc.Init {
+			if !nameRe.MatchString(iname) {
+				bad("%s: init %s: name must be lowercase alphanumeric/dashes", p, iname)
+			}
+			if len(ic.Command) == 0 {
+				bad("%s: init %s: command is required", p, iname)
+			}
+		}
+		for scName, sc := range svc.Sidecars {
+			if !nameRe.MatchString(scName) {
+				bad("%s: sidecar %s: name must be lowercase alphanumeric/dashes", p, scName)
+			}
+			if sc.Image == "" {
+				bad("%s: sidecar %s: image is required", p, scName)
+			}
+			for vol := range sc.Volumes {
+				if _, ok := svc.Volumes[vol]; !ok {
+					bad("%s: sidecar %s: volume %q must also be mounted by the service", p, scName, vol)
+				}
+			}
+		}
+		if svc.Shm != "" {
+			if _, err := resource.ParseQuantity(svc.Shm); err != nil {
+				bad("%s: shm: invalid size %q", p, svc.Shm)
+			}
+		}
+		if svc.StopGrace < 0 {
+			bad("%s: stop-grace must be positive seconds", p)
+		}
+		if svc.Health != nil && svc.Health.Grace < 0 {
+			bad("%s: health.grace must be positive seconds", p)
+		}
+		if n := svc.Network; n != nil {
+			switch n.Egress {
+			case "", "restricted", "internal":
+			default:
+				bad("%s: network.egress must be restricted or internal", p)
+			}
+			for _, c := range n.Allow {
+				if _, _, err := net.ParseCIDR(c); err != nil {
+					bad("%s: network.allow: %q is not a CIDR", p, c)
+				}
+			}
+			if n.Host && n.Egress != "" {
+				bad("%s: network.host bypasses the pod network; egress policy cannot apply", p)
+			}
+		}
+		if pl := svc.Placement; pl != nil {
+			for _, t := range pl.Tolerate {
+				switch t.Effect {
+				case "", "NoSchedule", "PreferNoSchedule", "NoExecute":
+				default:
+					bad("%s: placement.tolerate effect %q invalid", p, t.Effect)
+				}
+			}
+		}
 		if svc.Schedule != "" {
 			if svc.HTTP != nil || svc.Replicas != nil || len(svc.Volumes) > 0 || len(svc.Expose) > 0 {
 				bad("%s: schedule is mutually exclusive with http, replicas, volumes, and expose", p)
@@ -194,6 +315,9 @@ func validate(app *App) error {
 
 	for _, name := range sortedKeys(app.Volumes) {
 		v := app.Volumes[name]
+		if v.Access != "" && v.Access != "rwo" && v.Access != "rwx" {
+			bad("volume %s: access must be rwo or rwx", name)
+		}
 		if v.Size == "" {
 			bad("volume %s: size is required", name)
 		} else if _, err := resource.ParseQuantity(v.Size); err != nil {

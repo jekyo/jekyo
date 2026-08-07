@@ -41,16 +41,17 @@ func New(kubeconfigPath string) (*Client, error) {
 // deploys working without a discovery round-trip; extend when the compiler
 // learns a new kind.
 var gvrs = map[schema.GroupVersionKind]schema.GroupVersionResource{
-	{Version: "v1", Kind: "Namespace"}:                             {Version: "v1", Resource: "namespaces"},
-	{Version: "v1", Kind: "PersistentVolumeClaim"}:                 {Version: "v1", Resource: "persistentvolumeclaims"},
-	{Version: "v1", Kind: "Service"}:                               {Version: "v1", Resource: "services"},
-	{Version: "v1", Kind: "Secret"}:                                {Version: "v1", Resource: "secrets"},
-	{Version: "v1", Kind: "ConfigMap"}:                             {Version: "v1", Resource: "configmaps"},
-	{Group: "apps", Version: "v1", Kind: "Deployment"}:             {Group: "apps", Version: "v1", Resource: "deployments"},
-	{Group: "batch", Version: "v1", Kind: "CronJob"}:               {Group: "batch", Version: "v1", Resource: "cronjobs"},
-	{Group: "apps", Version: "v1", Kind: "StatefulSet"}:            {Group: "apps", Version: "v1", Resource: "statefulsets"},
-	{Group: "networking.k8s.io", Version: "v1", Kind: "Ingress"}:   {Group: "networking.k8s.io", Version: "v1", Resource: "ingresses"},
-	{Group: "projectcontour.io", Version: "v1", Kind: "HTTPProxy"}: {Group: "projectcontour.io", Version: "v1", Resource: "httpproxies"},
+	{Version: "v1", Kind: "Namespace"}:                                 {Version: "v1", Resource: "namespaces"},
+	{Version: "v1", Kind: "PersistentVolumeClaim"}:                     {Version: "v1", Resource: "persistentvolumeclaims"},
+	{Version: "v1", Kind: "Service"}:                                   {Version: "v1", Resource: "services"},
+	{Version: "v1", Kind: "Secret"}:                                    {Version: "v1", Resource: "secrets"},
+	{Version: "v1", Kind: "ConfigMap"}:                                 {Version: "v1", Resource: "configmaps"},
+	{Group: "apps", Version: "v1", Kind: "Deployment"}:                 {Group: "apps", Version: "v1", Resource: "deployments"},
+	{Group: "batch", Version: "v1", Kind: "CronJob"}:                   {Group: "batch", Version: "v1", Resource: "cronjobs"},
+	{Group: "apps", Version: "v1", Kind: "StatefulSet"}:                {Group: "apps", Version: "v1", Resource: "statefulsets"},
+	{Group: "networking.k8s.io", Version: "v1", Kind: "Ingress"}:       {Group: "networking.k8s.io", Version: "v1", Resource: "ingresses"},
+	{Group: "networking.k8s.io", Version: "v1", Kind: "NetworkPolicy"}: {Group: "networking.k8s.io", Version: "v1", Resource: "networkpolicies"},
+	{Group: "projectcontour.io", Version: "v1", Kind: "HTTPProxy"}:     {Group: "projectcontour.io", Version: "v1", Resource: "httpproxies"},
 }
 
 // GVR resolves the resource for a kind JEKYO manages.
@@ -73,5 +74,7 @@ func PrunableGVRs() []schema.GroupVersionResource {
 		{Group: "networking.k8s.io", Version: "v1", Resource: "ingresses"},
 		{Version: "v1", Resource: "configmaps"},
 		{Group: "projectcontour.io", Version: "v1", Resource: "httpproxies"},
+		{Group: "networking.k8s.io", Version: "v1", Resource: "networkpolicies"},
+		{Version: "v1", Resource: "secrets"},
 	}
 }

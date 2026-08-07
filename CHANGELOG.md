@@ -6,6 +6,54 @@ All notable changes to JEKYO are documented here. The format follows
 may contain breaking changes and patches never do. From 1.0 on, breaking
 changes only land in major versions.
 
+## [0.20.0] - 2026-08-07
+
+Seventeen issues from the tracker, sixteen closed. Thank you for the
+best-written bug reports this project has received.
+
+### Added
+
+- `secrets:` on a service delivers env values via a Kubernetes Secret
+  and secretKeyRef instead of inline literals, and `jekyo render`
+  redacts them (#1).
+- `files:` mounts operator-supplied files: a local path becomes a
+  ConfigMap entry, interpolated content becomes a Secret mounted 0600,
+  both via subPath so directories are not shadowed (#8).
+- `init:` run-to-completion containers before the service starts,
+  inheriting env, secrets and volumes (#13).
+- `sidecars:` extra containers in the service's pod, sharing volumes
+  and localhost (#9).
+- `network.egress: restricted|internal` renders enforced NetworkPolicy
+  presets with CIDR exceptions via `allow:`; SSRF in an app no longer
+  reaches the cluster or metadata (#5).
+- `network.host: true` and `caps: [NET_ADMIN]` for networking
+  workloads (#2).
+- `security:` run-as, read-only-root, no-new-privileges, with the
+  runtime default seccomp profile (#6).
+- `placement:` node selectors and tolerations (#11).
+- `expose.host:` publishes raw TCP/UDP on any conventional host port,
+  not just the NodePort range (#10).
+- `stop-grace:` sets terminationGracePeriodSeconds (#7).
+- `shm:` sizes /dev/shm so browser workloads work by default (#3).
+- `metrics:` renders Prometheus scrape annotations (#12).
+- `volumes.<name>.access: rwx` for ReadWriteMany claims (#14).
+- `health.grace:` a startup budget in seconds (default 60).
+
+### Fixed
+
+- Probes are wired correctly: a startupProbe owns the boot budget, the
+  readiness probe sheds traffic without killing the pod, and liveness
+  restarts only the truly wedged (#16).
+- `jekyo render` fails when `build.dockerfile` does not exist instead
+  of deferring the error to deploy (#17).
+- `jekyo schema` agrees with the validator: `health.command` and the
+  `{path, subpath}` volume mount form are accepted (#15).
+
+### Not yet
+
+- Per-service PID limits (#4) have no Kubernetes API; a cluster-wide
+  kubelet default is the honest option and is under consideration.
+
 ## [0.19.0] - 2026-08-07
 
 ### Added

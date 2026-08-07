@@ -112,8 +112,96 @@ func Compile(app *dsl.App, opts Options) ([]runtime.Object, error) {
 		if svc.HTTP != nil {
 			objs = append(objs, ingress(app, name, svc))
 		}
+		if len(svc.Secrets) > 0 {
+			data := map[string]string{}
+			for k, v := range svc.Secrets {
+				data[k] = v
+			}
+			objs = append(objs, &corev1.Secret{
+				TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "Secret"},
+				ObjectMeta: metav1.ObjectMeta{Name: secretsName(name), Namespace: NamespaceFor(app.Name), Labels: labels(app, name)},
+				StringData: data,
+			})
+		}
+		plainFiles, secretFiles := splitFiles(svc)
+		if len(plainFiles) > 0 {
+			data := map[string]string{}
+			for mount, f := range plainFiles {
+				data[fileKey(mount)] = f.Content
+			}
+			objs = append(objs, &corev1.ConfigMap{
+				TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "ConfigMap"},
+				ObjectMeta: metav1.ObjectMeta{Name: filesName(name, false), Namespace: NamespaceFor(app.Name), Labels: labels(app, name)},
+				Data:       data,
+			})
+		}
+		if len(secretFiles) > 0 {
+			data := map[string]string{}
+			for mount, f := range secretFiles {
+				data[fileKey(mount)] = f.Content
+			}
+			objs = append(objs, &corev1.Secret{
+				TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "Secret"},
+				ObjectMeta: metav1.ObjectMeta{Name: filesName(name, true), Namespace: NamespaceFor(app.Name), Labels: labels(app, name)},
+				StringData: data,
+			})
+		}
+		if n := svc.Network; n != nil && n.Egress != "" {
+			objs = append(objs, egressPolicy(app, name, n))
+		}
 	}
 	return objs, nil
+}
+
+// egressPolicy renders the named egress preset as a NetworkPolicy
+// (issue #5). k3s ships a policy controller, so these are enforced.
+func egressPolicy(app *dsl.App, name string, n *dsl.Network) *networkingv1.NetworkPolicy {
+	proto := corev1.ProtocolUDP
+	dnsPort := intstr.FromInt32(53)
+	dnsTCP := corev1.ProtocolTCP
+	rules := []networkingv1.NetworkPolicyEgressRule{{
+		// DNS stays open in every preset
+		Ports: []networkingv1.NetworkPolicyPort{
+			{Protocol: &proto, Port: &dnsPort},
+			{Protocol: &dnsTCP, Port: &dnsPort},
+		},
+	}}
+	switch n.Egress {
+	case "restricted":
+		// public internet only: private ranges, link-local/metadata and
+		// the cluster are unreachable
+		rules = append(rules, networkingv1.NetworkPolicyEgressRule{
+			To: []networkingv1.NetworkPolicyPeer{{
+				IPBlock: &networkingv1.IPBlock{
+					CIDR: "0.0.0.0/0",
+					Except: []string{
+						"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16",
+					},
+				},
+			}},
+		})
+	case "internal":
+		rules = append(rules, networkingv1.NetworkPolicyEgressRule{
+			To: []networkingv1.NetworkPolicyPeer{
+				{IPBlock: &networkingv1.IPBlock{CIDR: "10.42.0.0/16"}},
+				{IPBlock: &networkingv1.IPBlock{CIDR: "10.43.0.0/16"}},
+			},
+		})
+	}
+	for _, cidr := range n.Allow {
+		rules = append(rules, networkingv1.NetworkPolicyEgressRule{
+			To: []networkingv1.NetworkPolicyPeer{{IPBlock: &networkingv1.IPBlock{CIDR: cidr}}},
+		})
+	}
+	return &networkingv1.NetworkPolicy{
+		TypeMeta:   metav1.TypeMeta{APIVersion: "networking.k8s.io/v1", Kind: "NetworkPolicy"},
+		ObjectMeta: metav1.ObjectMeta{Name: name + "-egress", Namespace: NamespaceFor(app.Name), Labels: labels(app, name)},
+		Spec: networkingv1.NetworkPolicySpec{
+			PodSelector: metav1.LabelSelector{MatchLabels: labels(app, name)},
+			PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeEgress},
+			Egress:      rules,
+		},
+	}
 }
 
 // matchingPullSecrets returns the logins whose host appears in some image
@@ -191,7 +279,7 @@ func standalonePVC(app *dsl.App, volName string) *corev1.PersistentVolumeClaim {
 		TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "PersistentVolumeClaim"},
 		ObjectMeta: metav1.ObjectMeta{Name: volName, Namespace: NamespaceFor(app.Name), Labels: labels(app, "")},
 		Spec: corev1.PersistentVolumeClaimSpec{
-			AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+			AccessModes: []corev1.PersistentVolumeAccessMode{accessMode(vol)},
 			Resources: corev1.VolumeResourceRequirements{
 				Requests: corev1.ResourceList{corev1.ResourceStorage: resource.MustParse(vol.Size)},
 			},
@@ -317,6 +405,103 @@ func workload(app *dsl.App, name string, svc dsl.Service, withPullSecret bool, s
 	if withPullSecret {
 		podSpec.ImagePullSecrets = []corev1.LocalObjectReference{{Name: pullSecretName}}
 	}
+	if svc.StopGrace > 0 {
+		g := int64(svc.StopGrace)
+		podSpec.TerminationGracePeriodSeconds = &g // issue #7
+	}
+	if svc.Shm != "" {
+		// browser workloads need a real /dev/shm (issue #3)
+		q := resource.MustParse(svc.Shm)
+		podSpec.Volumes = append(podSpec.Volumes, corev1.Volume{
+			Name: "shm",
+			VolumeSource: corev1.VolumeSource{
+				EmptyDir: &corev1.EmptyDirVolumeSource{Medium: corev1.StorageMediumMemory, SizeLimit: &q},
+			},
+		})
+		podSpec.Containers[0].VolumeMounts = append(podSpec.Containers[0].VolumeMounts,
+			corev1.VolumeMount{Name: "shm", MountPath: "/dev/shm"})
+	}
+	if n := svc.Network; n != nil && n.Host {
+		podSpec.HostNetwork = true
+		podSpec.DNSPolicy = corev1.DNSClusterFirstWithHostNet // issue #2
+	}
+	if pl := svc.Placement; pl != nil {
+		podSpec.NodeSelector = pl.Selector
+		for _, t := range pl.Tolerate {
+			tol := corev1.Toleration{Key: t.Key, Value: t.Value, Effect: corev1.TaintEffect(t.Effect)}
+			if t.Value == "" {
+				tol.Operator = corev1.TolerationOpExists
+			} else {
+				tol.Operator = corev1.TolerationOpEqual
+			}
+			podSpec.Tolerations = append(podSpec.Tolerations, tol) // issue #11
+		}
+	}
+	// files: mounted with subPath so directories are not shadowed (issue #8)
+	plainFiles, secretFiles := splitFiles(svc)
+	if len(plainFiles) > 0 {
+		podSpec.Volumes = append(podSpec.Volumes, corev1.Volume{
+			Name: "files",
+			VolumeSource: corev1.VolumeSource{ConfigMap: &corev1.ConfigMapVolumeSource{
+				LocalObjectReference: corev1.LocalObjectReference{Name: filesName(name, false)},
+			}},
+		})
+		for _, mount := range sortedKeys(plainFiles) {
+			podSpec.Containers[0].VolumeMounts = append(podSpec.Containers[0].VolumeMounts,
+				corev1.VolumeMount{Name: "files", MountPath: mount, SubPath: fileKey(mount)})
+		}
+	}
+	if len(secretFiles) > 0 {
+		mode := int32(0o600)
+		podSpec.Volumes = append(podSpec.Volumes, corev1.Volume{
+			Name: "files-secret",
+			VolumeSource: corev1.VolumeSource{Secret: &corev1.SecretVolumeSource{
+				SecretName: filesName(name, true), DefaultMode: &mode,
+			}},
+		})
+		for _, mount := range sortedKeys(secretFiles) {
+			podSpec.Containers[0].VolumeMounts = append(podSpec.Containers[0].VolumeMounts,
+				corev1.VolumeMount{Name: "files-secret", MountPath: mount, SubPath: fileKey(mount)})
+		}
+	}
+	// init containers inherit image, env, secrets and mounts (issue #13)
+	for _, iname := range sortedKeys(svc.Init) {
+		ic := svc.Init[iname]
+		img := ic.Image
+		if img == "" {
+			img = svc.Image
+		}
+		initC := corev1.Container{Name: "init-" + iname, Image: img, Command: ic.Command, Args: ic.Args}
+		initC.Env = append(initC.Env, podSpec.Containers[0].Env...)
+		for _, k := range sortedKeys(ic.Env) {
+			initC.Env = append(initC.Env, corev1.EnvVar{Name: k, Value: ic.Env[k]})
+		}
+		podSpec.InitContainers = append(podSpec.InitContainers, initC)
+	}
+	// sidecars share the pod (issue #9)
+	for _, scName := range sortedKeys(svc.Sidecars) {
+		sc := svc.Sidecars[scName]
+		side := corev1.Container{Name: scName, Image: sc.Image, Command: sc.Command, Args: sc.Args}
+		for _, k := range sortedKeys(sc.Env) {
+			side.Env = append(side.Env, corev1.EnvVar{Name: k, Value: sc.Env[k]})
+		}
+		for _, p := range sc.AllPorts() {
+			side.Ports = append(side.Ports, corev1.ContainerPort{ContainerPort: int32(p), Name: scName[:min(9, len(scName))] + "-" + strconv.Itoa(p)})
+		}
+		if res, err := resources(sc.Resources); err == nil {
+			side.Resources = res
+		}
+		for _, volName := range sortedKeys(sc.Volumes) {
+			vm := sc.Volumes[volName]
+			side.VolumeMounts = append(side.VolumeMounts,
+				corev1.VolumeMount{Name: volName, MountPath: vm.Path, SubPath: vm.Subpath})
+		}
+		podSpec.Containers = append(podSpec.Containers, side)
+	}
+	if svc.Metrics != nil || len(svc.Init) > 0 {
+		// init volume mounts follow after volumes are wired below
+		_ = svc.Metrics
+	}
 
 	if svc.Schedule != "" {
 		podSpec.RestartPolicy = corev1.RestartPolicyOnFailure
@@ -348,6 +533,22 @@ func workload(app *dsl.App, name string, svc dsl.Service, withPullSecret bool, s
 		ObjectMeta: metav1.ObjectMeta{Labels: labels(app, name)},
 		Spec:       podSpec,
 	}
+	if m := svc.Metrics; m != nil {
+		// scrape annotations; a ServiceMonitor can layer on later (issue #12)
+		path := m.Path
+		if path == "" {
+			path = "/metrics"
+		}
+		port := m.Port
+		if port == 0 {
+			port = svc.MainPort()
+		}
+		podTmpl.Annotations = map[string]string{
+			"prometheus.io/scrape": "true",
+			"prometheus.io/path":   path,
+			"prometheus.io/port":   strconv.Itoa(port),
+		}
+	}
 
 	if !svc.IsStateful() {
 		return &appsv1.Deployment{
@@ -366,6 +567,10 @@ func workload(app *dsl.App, name string, svc dsl.Service, withPullSecret bool, s
 		vm := svc.Volumes[volName]
 		podTmpl.Spec.Containers[0].VolumeMounts = append(podTmpl.Spec.Containers[0].VolumeMounts,
 			corev1.VolumeMount{Name: volName, MountPath: vm.Path, SubPath: vm.Subpath})
+		for i := range podTmpl.Spec.InitContainers {
+			podTmpl.Spec.InitContainers[i].VolumeMounts = append(podTmpl.Spec.InitContainers[i].VolumeMounts,
+				corev1.VolumeMount{Name: volName, MountPath: vm.Path, SubPath: vm.Subpath})
+		}
 		if shared[volName] {
 			// Mount the app-shared PVC instead of claiming a private one.
 			podTmpl.Spec.Volumes = append(podTmpl.Spec.Volumes, corev1.Volume{
@@ -380,7 +585,7 @@ func workload(app *dsl.App, name string, svc dsl.Service, withPullSecret bool, s
 		claim := corev1.PersistentVolumeClaim{
 			ObjectMeta: metav1.ObjectMeta{Name: volName},
 			Spec: corev1.PersistentVolumeClaimSpec{
-				AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+				AccessModes: []corev1.PersistentVolumeAccessMode{accessMode(vol)},
 				Resources: corev1.VolumeResourceRequirements{
 					Requests: corev1.ResourceList{corev1.ResourceStorage: resource.MustParse(vol.Size)},
 				},
@@ -415,6 +620,14 @@ func container(name string, svc dsl.Service) (*corev1.Container, error) {
 	for _, k := range sortedKeys(svc.Env) {
 		c.Env = append(c.Env, corev1.EnvVar{Name: k, Value: svc.Env[k]})
 	}
+	// secrets: ride a Secret via secretKeyRef, never inline (issue #1)
+	for _, k := range sortedKeys(svc.Secrets) {
+		c.Env = append(c.Env, corev1.EnvVar{Name: k, ValueFrom: &corev1.EnvVarSource{
+			SecretKeyRef: &corev1.SecretKeySelector{
+				LocalObjectReference: corev1.LocalObjectReference{Name: secretsName(name)}, Key: k,
+			},
+		}})
+	}
 	for _, p := range svc.AllPorts() {
 		c.Ports = append(c.Ports, corev1.ContainerPort{ContainerPort: int32(p), Name: portName(p)})
 	}
@@ -423,7 +636,34 @@ func container(name string, svc dsl.Service) (*corev1.Container, error) {
 		if e.Protocol == "udp" {
 			proto = corev1.ProtocolUDP
 		}
-		c.Ports = append(c.Ports, corev1.ContainerPort{ContainerPort: int32(e.Port), Protocol: proto, Name: "x-" + strconv.Itoa(e.Port)})
+		cp := corev1.ContainerPort{ContainerPort: int32(e.Port), Protocol: proto, Name: "x-" + strconv.Itoa(e.Port)}
+		if e.Host != 0 {
+			cp.HostPort = int32(e.Host) // conventional TCP port (issue #10)
+		}
+		c.Ports = append(c.Ports, cp)
+	}
+	if len(svc.Caps) > 0 || svc.Security != nil {
+		sc := &corev1.SecurityContext{}
+		if len(svc.Caps) > 0 {
+			var caps []corev1.Capability
+			for _, cap := range svc.Caps {
+				caps = append(caps, corev1.Capability(cap))
+			}
+			sc.Capabilities = &corev1.Capabilities{Add: caps}
+		}
+		if sec := svc.Security; sec != nil {
+			sc.RunAsUser = sec.RunAs
+			if sec.ReadOnlyRoot {
+				t := true
+				sc.ReadOnlyRootFilesystem = &t
+			}
+			if sec.NoNewPrivileges != nil {
+				f := !*sec.NoNewPrivileges
+				sc.AllowPrivilegeEscalation = &f
+			}
+			sc.SeccompProfile = &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault}
+		}
+		c.SecurityContext = sc
 	}
 
 	if svc.GPU.Enabled() {
@@ -444,27 +684,36 @@ func container(name string, svc dsl.Service) (*corev1.Container, error) {
 	c.Resources = res
 
 	if h := svc.Health; h != nil {
-		probe := &corev1.Probe{}
+		handler := corev1.ProbeHandler{}
 		if len(h.Command) > 0 {
-			probe.ProbeHandler = corev1.ProbeHandler{
-				Exec: &corev1.ExecAction{Command: h.Command},
-			}
+			handler.Exec = &corev1.ExecAction{Command: h.Command}
 		} else {
 			port := h.Port
 			if port == 0 {
 				port = svc.MainPort()
 			}
-			probe.ProbeHandler = corev1.ProbeHandler{
-				HTTPGet: &corev1.HTTPGetAction{Path: h.Path, Port: intstr.FromInt32(int32(port))},
-			}
+			handler.HTTPGet = &corev1.HTTPGetAction{Path: h.Path, Port: intstr.FromInt32(int32(port))}
 		}
-		c.ReadinessProbe = probe
-		liveness := *probe
-		liveness.FailureThreshold = 6
-		liveness.PeriodSeconds = 10
-		c.LivenessProbe = &liveness
+		// startup owns the boot budget so slow starters are not killed;
+		// after it passes, readiness sheds traffic and liveness restarts
+		// only the truly wedged (issue #16)
+		grace := int32(h.GraceSeconds())
+		c.StartupProbe = &corev1.Probe{ProbeHandler: handler, PeriodSeconds: 5, FailureThreshold: (grace + 4) / 5}
+		c.ReadinessProbe = &corev1.Probe{ProbeHandler: handler, PeriodSeconds: 10, FailureThreshold: 3}
+		c.LivenessProbe = &corev1.Probe{ProbeHandler: handler, PeriodSeconds: 10, FailureThreshold: 3}
 	}
 	return c, nil
+}
+
+// secretsName is the per-service Secret carrying secrets: env values.
+func secretsName(svc string) string { return svc + "-secrets" }
+
+// filesName is the per-service ConfigMap/Secret pair for files: mounts.
+func filesName(svc string, secret bool) string {
+	if secret {
+		return svc + "-files-secret"
+	}
+	return svc + "-files"
 }
 
 func resources(r dsl.Resources) (corev1.ResourceRequirements, error) {
@@ -500,9 +749,17 @@ func resources(r dsl.Resources) (corev1.ResourceRequirements, error) {
 
 // service renders the ClusterIP Service (named ports) and, when expose: is
 // used, a separate NodePort Service.
+func sidecarPorts(svc dsl.Service) []int {
+	var out []int
+	for _, scName := range sortedKeys(svc.Sidecars) {
+		out = append(out, svc.Sidecars[scName].AllPorts()...)
+	}
+	return out
+}
+
 func service(app *dsl.App, name string, svc dsl.Service) []runtime.Object {
 	var objs []runtime.Object
-	if ports := svc.AllPorts(); len(ports) > 0 {
+	if ports := append(svc.AllPorts(), sidecarPorts(svc)...); len(ports) > 0 {
 		var sp []corev1.ServicePort
 		for _, p := range ports {
 			sp = append(sp, corev1.ServicePort{
@@ -647,6 +904,31 @@ func mergeLabels(a, b map[string]string) map[string]string {
 }
 
 func ptrInt32(v int32) *int32 { return &v }
+
+func accessMode(v dsl.Volume) corev1.PersistentVolumeAccessMode {
+	if v.Access == "rwx" {
+		return corev1.ReadWriteMany
+	}
+	return corev1.ReadWriteOnce
+}
+
+// splitFiles partitions files: into plain (ConfigMap) and secret content.
+func splitFiles(svc dsl.Service) (plain, secret map[string]dsl.FileMount) {
+	plain, secret = map[string]dsl.FileMount{}, map[string]dsl.FileMount{}
+	for mount, f := range svc.Files {
+		if f.From != "" {
+			secret[mount] = f
+		} else {
+			plain[mount] = f
+		}
+	}
+	return
+}
+
+// fileKey flattens a mount path into a ConfigMap/Secret key.
+func fileKey(mount string) string {
+	return strings.Trim(strings.ReplaceAll(mount, "/", "-"), "-")
+}
 
 func portName(p int) string { return "p" + strconv.Itoa(p) }
 

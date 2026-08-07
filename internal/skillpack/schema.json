@@ -63,6 +63,14 @@
                 "default": 7
               }
             }
+          },
+          "access": {
+            "type": "string",
+            "enum": [
+              "rwo",
+              "rwx"
+            ],
+            "description": "Claim access mode; default rwo."
           }
         }
       }
@@ -184,6 +192,10 @@
                   "tcp",
                   "udp"
                 ]
+              },
+              "host": {
+                "type": "integer",
+                "description": "Publish on this host port (any conventional number; not 80/443/6443)."
               }
             }
           }
@@ -216,15 +228,23 @@
         "health": {
           "type": "object",
           "additionalProperties": false,
-          "required": [
-            "path"
-          ],
           "properties": {
             "path": {
               "type": "string"
             },
             "port": {
               "type": "integer"
+            },
+            "command": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Exec probe command; mutually exclusive with path."
+            },
+            "grace": {
+              "type": "integer",
+              "description": "Startup budget in seconds before liveness applies (default 60)."
             }
           }
         },
@@ -255,8 +275,237 @@
         "volumes": {
           "type": "object",
           "additionalProperties": {
-            "type": "string"
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  },
+                  "subpath": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path"
+                ],
+                "additionalProperties": false
+              }
+            ]
           }
+        },
+        "secrets": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Env vars delivered via a Kubernetes Secret and secretKeyRef, never inline. Same ${VAR} interpolation as env."
+        },
+        "files": {
+          "type": "object",
+          "description": "Mount operator-supplied files: value is a local file path (ConfigMap) or {from, mode} (Secret).",
+          "additionalProperties": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "from": {
+                    "type": "string"
+                  },
+                  "mode": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "from"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          }
+        },
+        "init": {
+          "type": "object",
+          "description": "Run-to-completion containers before the service starts; inherit env, secrets, volumes.",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "image": {
+                "type": "string"
+              },
+              "command": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "args": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "env": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "command"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "sidecars": {
+          "type": "object",
+          "description": "Extra containers in the pod sharing volumes and localhost.",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "image": {
+                "type": "string"
+              },
+              "command": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "args": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "env": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              },
+              "port": {
+                "type": "integer"
+              },
+              "ports": {
+                "type": "array",
+                "items": {
+                  "type": "integer"
+                }
+              },
+              "resources": {
+                "type": "object"
+              },
+              "volumes": {
+                "type": "object"
+              }
+            },
+            "required": [
+              "image"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "stop-grace": {
+          "type": "integer",
+          "description": "terminationGracePeriodSeconds."
+        },
+        "shm": {
+          "type": "string",
+          "description": "Size of /dev/shm, e.g. 1Gi."
+        },
+        "caps": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Linux capabilities to add, e.g. NET_ADMIN."
+        },
+        "security": {
+          "type": "object",
+          "properties": {
+            "run-as": {
+              "type": "integer"
+            },
+            "read-only-root": {
+              "type": "boolean"
+            },
+            "no-new-privileges": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        },
+        "network": {
+          "type": "object",
+          "properties": {
+            "host": {
+              "type": "boolean"
+            },
+            "egress": {
+              "type": "string",
+              "enum": [
+                "restricted",
+                "internal"
+              ]
+            },
+            "allow": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "placement": {
+          "type": "object",
+          "properties": {
+            "selector": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "tolerate": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "key": {
+                    "type": "string"
+                  },
+                  "value": {
+                    "type": "string"
+                  },
+                  "effect": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "metrics": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string"
+            },
+            "port": {
+              "type": "integer"
+            }
+          },
+          "additionalProperties": false
         }
       }
     }

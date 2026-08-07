@@ -40,7 +40,8 @@ services:               # required, at least one
                               # image/build/port), it runs no container
     expose:                   # raw TCP/UDP on the node
       - port: 5432
-        node: 30432           # NodePort 30000-32767
+        node: 30432           # NodePort 30000-32767, OR:
+        host: 1080            # any conventional host port (not 80/443/6443)
         protocol: tcp         # tcp|udp
     resources:
       cpu: 500m               # guaranteed (requests)
@@ -50,9 +51,41 @@ services:               # required, at least one
     replicas: 2               # default 1; >1 not allowed with volumes
     stateful: true            # force StatefulSet; implied by volumes:
     health:
-      path: /healthz          # HTTP readiness+liveness probe, OR:
+      path: /healthz          # HTTP probe, OR:
       command: ["mysqladmin", "ping"]   # exec probe (mutually exclusive with path)
       port: 8080              # default: main port
+      grace: 300              # startup budget seconds before liveness applies (default 60)
+    secrets:                  # like env, but delivered via a Kubernetes Secret
+      ADMIN_PW: ${ADMIN_PW}   # (secretKeyRef, redacted in jekyo render)
+    files:                    # operator-supplied files, no image rebuild
+      /etc/app/conf.yaml: ./conf.yaml   # local file -> ConfigMap
+      /etc/app/key.pem:
+        from: ${TLS_KEY}      # interpolated content -> Secret, mode 0600
+    init:                     # run-to-completion before the service starts
+      migrate:
+        command: ["app", "migrate"]     # inherits env/secrets/volumes; image: overrides
+    sidecars:                 # extra containers in the same pod
+      exporter:
+        image: prom/exporter
+        port: 9100
+        volumes: {data: /data}          # same claim, same pod
+    stop-grace: 120           # terminationGracePeriodSeconds
+    shm: 1Gi                  # size /dev/shm (browser workloads)
+    caps: [NET_ADMIN]         # extra Linux capabilities
+    security:
+      run-as: 1000
+      read-only-root: true
+      no-new-privileges: true
+    network:
+      host: true              # host networking (excludes egress policy)
+      egress: restricted      # or internal; enforced NetworkPolicy presets
+      allow: [10.0.5.0/24]    # CIDR exceptions
+    placement:
+      selector: {kubernetes.io/hostname: node1}
+      tolerate: [{key: dedicated, value: gpu, effect: NoSchedule}]
+    metrics:
+      path: /metrics          # prometheus scrape annotations
+      port: 9100
     gpu: 1                    # NVIDIA runtime; or {count: 1, devices: "0,2"}
     schedule: "0 3 * * *"     # makes this a CronJob; excludes http/replicas/volumes/expose
     volumes:
@@ -65,6 +98,7 @@ volumes:                # required for every volume mounted above
   data:
     size: 10Gi          # required
     class: local-path   # optional storage class
+    access: rwo         # or rwx (ReadWriteMany; storage class must support it)
     backup:             # optional scheduled backups (restic to S3)
       schedule: "0 3 * * *"   # cron; jekyo init also accepts 15m/hourly/daily
       keep: 7                 # snapshots retained
@@ -105,7 +139,7 @@ Convert a compose file to jekyo.yaml with these rules:
 | `environment:` (list or map) | `env:` map; quote all values |
 | `ports: ["8080:80"]` | `port: 80` (container port); public access via `http:` instead |
 | `volumes: [data:/var/lib/x]` | service `volumes:` + top-level `volumes:` with a size |
-| `volumes: [./file.conf:/etc/x]` | not supported; bake the file into the image with `build.inline` |
+| `volumes: [./file.conf:/etc/x]` | `files: {/etc/x/file.conf: ./file.conf}` |
 | `depends_on`, `restart`, `container_name`, `networks`, `labels` | drop them; Kubernetes handles these |
 | `healthcheck.test: [CMD, x]` | `health.command: [x]` |
 | `healthcheck.test: [CMD-SHELL, x]` | `health.command: [sh, -c, x]` |

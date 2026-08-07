@@ -77,6 +77,13 @@ func (d *Deployer) prune(ctx context.Context, appName string, applied map[string
 			return fmt.Errorf("prune: listing %s: %w", gvr.Resource, err)
 		}
 		for _, item := range list.Items {
+			// releases and the backup credential are jekyo-managed state,
+			// never render output; pruning them would destroy history
+			if gvr.Resource == "secrets" {
+				if _, isRelease := item.GetLabels()[releaseLabel]; isRelease || item.GetName() == compile.BackupSecretName {
+					continue
+				}
+			}
 			key := gvr.Resource + "/" + item.GetNamespace() + "/" + item.GetName()
 			if !applied[key] {
 				if err := d.Client.Dynamic.Resource(gvr).Namespace(ns).Delete(ctx, item.GetName(), metav1.DeleteOptions{}); err != nil && !errors.IsNotFound(err) {
