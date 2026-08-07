@@ -47,6 +47,64 @@ func splitTarget3(s string) (app, svc, container string) {
 	return
 }
 
+// resolveServiceTarget interprets the second target segment: a service
+// name when one matches, otherwise a container (sidecar) somewhere in
+// the app's pods (issue #21). Returns the service owning the pods and
+// the container to address ("" = default).
+func resolveServiceTarget(pods []corev1.Pod, appName, seg, explicit string) (svc, container string, matched []corev1.Pod, err error) {
+	if seg == "" {
+		return "", explicit, pods, nil
+	}
+	var bySvc []corev1.Pod
+	for _, p := range pods {
+		if p.Labels[compile.LabelService] == seg {
+			bySvc = append(bySvc, p)
+		}
+	}
+	if len(bySvc) > 0 {
+		return seg, explicit, bySvc, nil
+	}
+	// no service by that name: is it a container in some service's pod?
+	owners := map[string][]corev1.Pod{}
+	for _, p := range pods {
+		for _, c := range p.Spec.Containers {
+			if c.Name == seg {
+				owner := p.Labels[compile.LabelService]
+				owners[owner] = append(owners[owner], p)
+			}
+		}
+	}
+	if len(owners) == 1 {
+		for owner, ps := range owners {
+			return owner, seg, ps, nil
+		}
+	}
+	if len(owners) > 1 {
+		var paths []string
+		for owner := range owners {
+			paths = append(paths, appName+"/"+owner+"/"+seg)
+		}
+		sort.Strings(paths)
+		return "", "", nil, fmt.Errorf("container %q exists in several services; use one of: %s", seg, strings.Join(paths, ", "))
+	}
+	// nothing matched: list what exists so the error teaches the syntax
+	svcSeen := map[string]bool{}
+	var names []string
+	for _, p := range pods {
+		if s := p.Labels[compile.LabelService]; s != "" && !svcSeen[s] {
+			svcSeen[s] = true
+			names = append(names, s)
+			for _, c := range p.Spec.Containers {
+				if c.Name != s {
+					names = append(names, s+"/"+c.Name)
+				}
+			}
+		}
+	}
+	sort.Strings(names)
+	return "", "", nil, fmt.Errorf("no service or container %q in app %s (have: %s)", seg, appName, strings.Join(names, ", "))
+}
+
 // pickContainer resolves which container a command targets: the explicit
 // third segment, else the container named after the service, else the
 // pod's first container. Unknown names error with the available list.
@@ -200,18 +258,22 @@ func newLogsCmd() *cobra.Command {
 		Short: "Show (or follow) logs for an app or one service",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			appName, svc, container := splitTarget3(args[0])
+			appName, seg, containerArg := splitTarget3(args[0])
 			d, err := newDeployer()
 			if err != nil {
 				return err
 			}
 			ctx := cmd.Context()
-			pods, err := d.Client.Typed.CoreV1().Pods(compile.NamespaceFor(appName)).List(ctx, metav1.ListOptions{LabelSelector: podSelector(appName, svc)})
+			all, err := d.Client.Typed.CoreV1().Pods(compile.NamespaceFor(appName)).List(ctx, metav1.ListOptions{LabelSelector: podSelector(appName, "")})
 			if err != nil {
 				return err
 			}
-			if len(pods.Items) == 0 {
-				return fmt.Errorf("no pods for %s", args[0])
+			if len(all.Items) == 0 {
+				return fmt.Errorf("no pods for app %s", appName)
+			}
+			_, container, matched, err := resolveServiceTarget(all.Items, appName, seg, containerArg)
+			if err != nil {
+				return err
 			}
 
 			opts := &corev1.PodLogOptions{Follow: follow, Timestamps: timestamps}
@@ -231,7 +293,7 @@ func newLogsCmd() *cobra.Command {
 			// (issue #19); a third target segment narrows to one container
 			type streamT struct{ label, pod, container string }
 			var streams []streamT
-			for _, p := range pods.Items {
+			for _, p := range matched {
 				for _, c := range p.Spec.Containers {
 					if container != "" && c.Name != container {
 						continue
@@ -244,7 +306,7 @@ func newLogsCmd() *cobra.Command {
 				}
 			}
 			if len(streams) == 0 {
-				return fmt.Errorf("no container %q in the pods of %s/%s", container, appName, svc)
+				return fmt.Errorf("no container %q in the pods of %s", container, args[0])
 			}
 			prefix := len(streams) > 1
 			var wg sync.WaitGroup
@@ -289,8 +351,8 @@ func newAttachCmd() *cobra.Command {
 		Short: "Attach to the running process of a service (Ctrl+C detaches)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			appName, svc, containerArg := splitTarget3(args[0])
-			if svc == "" {
+			appName, seg, containerArg := splitTarget3(args[0])
+			if seg == "" {
 				return fmt.Errorf("target must be <app>/<service>[/<container>]")
 			}
 			d, err := newDeployer()
@@ -298,14 +360,18 @@ func newAttachCmd() *cobra.Command {
 				return err
 			}
 			ctx := cmd.Context()
-			pods, err := d.Client.Typed.CoreV1().Pods(compile.NamespaceFor(appName)).List(ctx, metav1.ListOptions{LabelSelector: podSelector(appName, svc)})
+			all, err := d.Client.Typed.CoreV1().Pods(compile.NamespaceFor(appName)).List(ctx, metav1.ListOptions{LabelSelector: podSelector(appName, "")})
+			if err != nil {
+				return err
+			}
+			svc, resolvedContainer, matched, err := resolveServiceTarget(all.Items, appName, seg, containerArg)
 			if err != nil {
 				return err
 			}
 			var pod *corev1.Pod
-			for i := range pods.Items {
-				if pods.Items[i].Status.Phase == corev1.PodRunning {
-					pod = &pods.Items[i]
+			for i := range matched {
+				if matched[i].Status.Phase == corev1.PodRunning {
+					pod = &matched[i]
 					break
 				}
 			}
@@ -313,7 +379,7 @@ func newAttachCmd() *cobra.Command {
 				return fmt.Errorf("no running pod for %s", args[0])
 			}
 
-			attachContainer, err := pickContainer(pod, svc, containerArg)
+			attachContainer, err := pickContainer(pod, svc, resolvedContainer)
 			if err != nil {
 				return err
 			}
@@ -356,8 +422,8 @@ func newExecCmd() *cobra.Command {
 		Short: "Run a command in a service's pod (default: interactive shell)",
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			appName, svc, containerArg := splitTarget3(args[0])
-			if svc == "" {
+			appName, seg, containerArg := splitTarget3(args[0])
+			if seg == "" {
 				return fmt.Errorf("target must be <app>/<service>[/<container>]")
 			}
 			command := args[1:]
@@ -369,14 +435,18 @@ func newExecCmd() *cobra.Command {
 				return err
 			}
 			ctx := cmd.Context()
-			pods, err := d.Client.Typed.CoreV1().Pods(compile.NamespaceFor(appName)).List(ctx, metav1.ListOptions{LabelSelector: podSelector(appName, svc)})
+			all, err := d.Client.Typed.CoreV1().Pods(compile.NamespaceFor(appName)).List(ctx, metav1.ListOptions{LabelSelector: podSelector(appName, "")})
+			if err != nil {
+				return err
+			}
+			svc, resolvedContainer, matched, err := resolveServiceTarget(all.Items, appName, seg, containerArg)
 			if err != nil {
 				return err
 			}
 			var pod *corev1.Pod
-			for i := range pods.Items {
-				if pods.Items[i].Status.Phase == corev1.PodRunning {
-					pod = &pods.Items[i]
+			for i := range matched {
+				if matched[i].Status.Phase == corev1.PodRunning {
+					pod = &matched[i]
 					break
 				}
 			}
@@ -384,7 +454,7 @@ func newExecCmd() *cobra.Command {
 				return fmt.Errorf("no running pod for %s", args[0])
 			}
 
-			execContainer, err := pickContainer(pod, svc, containerArg)
+			execContainer, err := pickContainer(pod, svc, resolvedContainer)
 			if err != nil {
 				return err
 			}
