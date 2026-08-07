@@ -220,7 +220,7 @@ func (m *uiModel) View() string {
 	if len(m.snap.Nodes) == 0 && len(m.rows) == 0 && m.err == "" && m.height >= len(uiSplash)+4 {
 		return m.splash()
 	}
-	leftW := 36
+	leftW := 40
 	if m.width < 90 {
 		leftW = m.width / 3
 	}
@@ -557,6 +557,7 @@ func (m *uiModel) viewTree(w, h int) string {
 		agg := byKey[k]
 		agg.CPUMilli += p.CPUMilli
 		agg.MemBytes += p.MemBytes
+		agg.Restarts += p.Restarts
 		agg.Status = p.Status
 		agg.Ready = p.Ready
 		byKey[k] = agg
@@ -564,7 +565,7 @@ func (m *uiModel) viewTree(w, h int) string {
 	inner := w - 2
 	var b strings.Builder
 	// column header aligned with the row layout below
-	b.WriteString(uiDimStyle.Render(fmt.Sprintf("    %-14s %6s %7s", "SERVICE", "CPU", "MEM")) + "\n")
+	b.WriteString(uiDimStyle.Render(fmt.Sprintf("    %-14s %6s %7s %3s", "SERVICE", "CPU", "MEM", "RST")) + "\n")
 	lines := 1
 	for i, r := range m.rows {
 		if lines >= h-1 {
@@ -582,7 +583,13 @@ func (m *uiModel) viewTree(w, h int) string {
 			if p.Status != "Running" {
 				dot = uiRed.Render("●")
 			}
-			body := fmt.Sprintf("%-14s %6s %7s ", truncate(r.service, 14), fmtCPU(p.CPUMilli), fmtMem(p.MemBytes))
+			rst := uiDimStyle.Render(fmt.Sprintf("%3d", p.Restarts))
+			if p.Restarts > 5 {
+				rst = uiRed.Render(fmt.Sprintf("%3d", p.Restarts))
+			} else if p.Restarts > 0 {
+				rst = uiAccent.Render(fmt.Sprintf("%3d", p.Restarts))
+			}
+			body := fmt.Sprintf("%-14s %6s %7s %s ", truncate(r.service, 14), fmtCPU(p.CPUMilli), fmtMem(p.MemBytes), rst)
 			pad := inner - lipgloss.Width(body) - 4
 			if pad > 0 {
 				body += strings.Repeat(" ", pad)

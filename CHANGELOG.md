@@ -6,6 +6,13 @@ All notable changes to JEKYO are documented here. The format follows
 may contain breaking changes and patches never do. From 1.0 on, breaking
 changes only land in major versions.
 
+## [0.20.1] - 2026-08-07
+
+### Added
+
+- The `jekyo ui` sidebar shows a restart count per service, dim at
+  zero, amber when restarting, red past five.
+
 ## [0.20.0] - 2026-08-07
 
 Seventeen issues from the tracker, sixteen closed. Thank you for the
