@@ -197,6 +197,9 @@ func validate(app *App) error {
 			if svc.HTTP.Auth != "" && svc.HTTP.Auth != "basic" {
 				bad("%s: http.auth must be \"basic\"", p)
 			}
+			if isRedirect && svc.HTTP.WebSocket.Enabled {
+				bad("%s: http.websocket has no effect on a redirect service", p)
+			}
 		}
 		for _, e := range svc.Expose {
 			if e.Port == 0 {

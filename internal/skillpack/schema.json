@@ -166,6 +166,13 @@
             "redirect": {
               "type": "string",
               "description": "Answer requests to this domain with a permanent redirect to the given host or URL; the service runs no container and must define nothing else."
+            },
+            "websocket": {
+              "oneOf": [
+                { "type": "boolean" },
+                { "type": "array", "items": { "type": "string" } }
+              ],
+              "description": "Opt the route into WebSocket upgrades (Contour rejects them with 403 otherwise). true enables it on the route path; a list of paths names specific routes."
             }
           }
         },

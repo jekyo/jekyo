@@ -6,6 +6,15 @@ All notable changes to JEKYO are documented here. The format follows
 may contain breaking changes and patches never do. From 1.0 on, breaking
 changes only land in major versions.
 
+## [0.23.0] - 2026-08-12
+
+### Added
+
+- `http.websocket` opts a route into WebSocket upgrades. Contour rejects
+  them with a 403 by default; `websocket: true` annotates the route path,
+  and a list of paths scopes it to specific routes. The setting survives
+  redeploys, unlike annotating the Ingress by hand (#22).
+
 ## [0.22.2] - 2026-08-08
 
 ### Changed

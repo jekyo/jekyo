@@ -819,6 +819,18 @@ func ingress(app *dsl.App, name string, svc dsl.Service) *networkingv1.Ingress {
 	pathType := networkingv1.PathTypePrefix
 
 	meta := metav1.ObjectMeta{Name: name, Namespace: NamespaceFor(app.Name), Labels: labels(app, name)}
+	if h.WebSocket.Enabled {
+		// Contour rejects WebSocket upgrades with 403 unless the route's
+		// paths are opted in by annotation (issue #22). Default to the
+		// route's own path; an explicit list overrides it.
+		wsPaths := h.WebSocket.Paths
+		if len(wsPaths) == 0 {
+			wsPaths = []string{path}
+		}
+		meta.Annotations = map[string]string{
+			"projectcontour.io/websocket-routes": strings.Join(wsPaths, ","),
+		}
+	}
 	ing := &networkingv1.Ingress{
 		TypeMeta:   metav1.TypeMeta{APIVersion: "networking.k8s.io/v1", Kind: "Ingress"},
 		ObjectMeta: meta,

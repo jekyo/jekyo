@@ -133,6 +133,34 @@ type HTTP struct {
 	// answered by the ingress with a permanent redirect to this host (or
 	// URL). A redirect service runs no container and defines nothing else.
 	Redirect string `yaml:"redirect"`
+	// WebSocket opts the route into HTTP Upgrade handling. Contour disables
+	// WebSocket upgrades by default and returns 403 unless the matching
+	// paths are named in projectcontour.io/websocket-routes (issue #22).
+	// true enables it on the route's path; a list names specific paths.
+	WebSocket WebSocket `yaml:"websocket"`
+}
+
+// WebSocket is either a bool (websocket: true) or a list of paths
+// (websocket: ["/ws", "/viewer"]) in the DSL.
+type WebSocket struct {
+	Enabled bool
+	Paths   []string
+}
+
+// UnmarshalYAML accepts a bool or a sequence of path strings.
+func (w *WebSocket) UnmarshalYAML(unmarshal func(any) error) error {
+	var b bool
+	if err := unmarshal(&b); err == nil {
+		w.Enabled = b
+		return nil
+	}
+	var paths []string
+	if err := unmarshal(&paths); err != nil {
+		return fmt.Errorf("websocket must be true/false or a list of paths")
+	}
+	w.Enabled = len(paths) > 0
+	w.Paths = paths
+	return nil
 }
 
 // Expose publishes a raw TCP/UDP port on the node (NodePort).

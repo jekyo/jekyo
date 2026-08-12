@@ -170,6 +170,49 @@ services:
 	t.Fatal("no ingress found")
 }
 
+func TestCompileWebSocket(t *testing.T) {
+	y := `
+app: a
+services:
+  bare:
+    image: x
+    port: 80
+    http:
+      domain: bare.local
+      websocket: true
+  listed:
+    image: x
+    port: 80
+    http:
+      domain: listed.local
+      websocket: ["/ws", "/viewer"]
+  off:
+    image: x
+    port: 80
+    http:
+      domain: off.local
+`
+	objs, err := Compile(mustParse(t, y), Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for _, o := range objs {
+		if ing, ok := o.(*networkingv1.Ingress); ok {
+			got[ing.Name] = ing.Annotations["projectcontour.io/websocket-routes"]
+		}
+	}
+	if got["bare"] != "/" {
+		t.Fatalf("websocket:true should annotate /, got %q", got["bare"])
+	}
+	if got["listed"] != "/ws,/viewer" {
+		t.Fatalf("path list should annotate the paths, got %q", got["listed"])
+	}
+	if got["off"] != "" {
+		t.Fatalf("no websocket should have no annotation, got %q", got["off"])
+	}
+}
+
 func TestCompileBuildRejected(t *testing.T) {
 	y := `
 app: a

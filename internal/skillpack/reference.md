@@ -38,6 +38,9 @@ services:               # required, at least one
       redirect: example.com   # domain-level redirect answered by the ingress;
                               # a redirect service defines NOTHING else (no
                               # image/build/port), it runs no container
+      websocket: true         # opt the route into WebSocket upgrades (Contour
+                              # 403s them otherwise); true = route path, or a
+                              # list of paths e.g. ["/ws", "/viewer"]
     expose:                   # raw TCP/UDP on the node
       - port: 5432
         node: 30432           # NodePort 30000-32767, OR:
