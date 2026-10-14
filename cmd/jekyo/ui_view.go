@@ -664,7 +664,8 @@ func (m *uiModel) viewRight(w, h int) string {
 	case tabStatus:
 		content = m.viewStatus(app, w)
 	default:
-		lines := m.logs[key]
+		target, _ := m.selectedTarget()
+		lines := m.logs[target]
 		if len(lines) > avail {
 			lines = lines[len(lines)-avail:]
 		}

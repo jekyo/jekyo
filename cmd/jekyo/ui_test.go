@@ -61,3 +61,32 @@ func TestUIViewSmoke(t *testing.T) {
 		t.Errorf("move landed on %q, want db", svc)
 	}
 }
+
+// A sidecar row shows its own container's logs and stays selected across
+// the 2s refresh instead of snapping back to its service row.
+func TestUISidecarRowLogs(t *testing.T) {
+	m := &uiModel{
+		ctxName: "test",
+		width:   150, height: 46,
+		snap: &topSnapshot{
+			Pods: []topPod{{App: "vatra", Service: "api", Ready: "2/2", Status: "Running",
+				Containers: []topContainer{{Name: "api"}, {Name: "unbound"}}}},
+		},
+		logs:   map[string][]string{"vatra/api": {"service line"}, "vatra/api/unbound": {"sidecar line"}},
+		hist:   map[string][]histPt{},
+		events: map[string][]string{},
+	}
+	m.rebuildRows()
+	m.move(1)
+	if target, _ := m.selectedTarget(); target != "vatra/api/unbound" {
+		t.Fatalf("selected %q, want the sidecar row", target)
+	}
+	m.rebuildRows()
+	if target, _ := m.selectedTarget(); target != "vatra/api/unbound" {
+		t.Fatalf("refresh moved selection to %q", target)
+	}
+	m.tab = tabLogs
+	if out := m.View(); !strings.Contains(out, "sidecar line") || strings.Contains(out, "service line") {
+		t.Error("sidecar row should show the sidecar's logs only")
+	}
+}

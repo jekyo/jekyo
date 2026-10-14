@@ -296,22 +296,7 @@ sidecar can be addressed directly as "shop/proxy".`,
 				opts.SinceSeconds = &secs
 			}
 
-			// one stream per container so multi-container pods just work
-			// (issue #19); a third target segment narrows to one container
-			type streamT struct{ label, pod, container string }
-			var streams []streamT
-			for _, p := range matched {
-				for _, c := range p.Spec.Containers {
-					if container != "" && c.Name != container {
-						continue
-					}
-					label := p.Name
-					if len(p.Spec.Containers) > 1 {
-						label = p.Name + "/" + c.Name
-					}
-					streams = append(streams, streamT{label: label, pod: p.Name, container: c.Name})
-				}
-			}
+			streams := logStreams(matched, container)
 			if len(streams) == 0 {
 				return fmt.Errorf("no container %q in the pods of %s", container, args[0])
 			}
@@ -349,6 +334,29 @@ sidecar can be addressed directly as "shop/proxy".`,
 	cmd.Flags().Int64Var(&tail, "tail", 200, "lines of recent logs per pod (0 = all)")
 	cmd.Flags().BoolVarP(&timestamps, "timestamps", "t", false, "prefix each line with its RFC3339 timestamp")
 	return cmd
+}
+
+// logStream is one container's log stream; label names it in output.
+type logStream struct{ label, pod, container string }
+
+// logStreams lists one stream per container so multi-container pods just
+// work (issue #19): the logs API rejects a request that names no
+// container on a pod with a sidecar. A non-empty container narrows to it.
+func logStreams(pods []corev1.Pod, container string) []logStream {
+	var out []logStream
+	for _, p := range pods {
+		for _, c := range p.Spec.Containers {
+			if container != "" && c.Name != container {
+				continue
+			}
+			label := p.Name
+			if len(p.Spec.Containers) > 1 {
+				label = p.Name + "/" + c.Name
+			}
+			out = append(out, logStream{label: label, pod: p.Name, container: c.Name})
+		}
+	}
+	return out
 }
 
 func newAttachCmd() *cobra.Command {

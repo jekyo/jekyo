@@ -345,12 +345,16 @@ func waitForLog(ch chan tea.Msg) tea.Cmd {
 	return func() tea.Msg { return <-ch }
 }
 
-// startLogStream follows logs of every pod of app/svc into m.logCh.
-func (m *uiModel) startLogStream(app, svc string) tea.Cmd {
+// startLogStream follows the logs of the selected row into m.logCh: every
+// container of every pod of app/svc, or one container for a sidecar row.
+func (m *uiModel) startLogStream(app, svc, container string) tea.Cmd {
 	if m.logCancel != nil {
 		m.logCancel()
 	}
 	key := app + "/" + svc
+	if container != "" {
+		key += "/" + container
+	}
 	m.logKey = key
 	ctx, cancel := context.WithCancel(context.Background())
 	m.logCancel = cancel
@@ -359,30 +363,45 @@ func (m *uiModel) startLogStream(app, svc string) tea.Cmd {
 
 	go func() {
 		defer func() { ch <- logDoneMsg{key} }()
+		send := func(line string) bool {
+			select {
+			case ch <- logLineMsg{key, line}:
+				return true
+			case <-ctx.Done():
+				return false
+			}
+		}
 		ns := compile.NamespaceFor(app)
 		pods, err := m.d.Client.Typed.CoreV1().Pods(ns).List(ctx, metav1.ListOptions{LabelSelector: podSelector(app, svc)})
 		if err != nil || len(pods.Items) == 0 {
 			return
 		}
+		streams := logStreams(pods.Items, container)
+		prefix := len(streams) > 1
 		tail := int64(120)
-		for _, p := range pods.Items {
-			opts := &corev1.PodLogOptions{Follow: true, TailLines: &tail}
-			rc, err := m.d.Client.Typed.CoreV1().Pods(ns).GetLogs(p.Name, opts).Stream(ctx)
+		for _, st := range streams {
+			opts := &corev1.PodLogOptions{Follow: true, TailLines: &tail, Container: st.container}
+			rc, err := m.d.Client.Typed.CoreV1().Pods(ns).GetLogs(st.pod, opts).Stream(ctx)
 			if err != nil {
+				if ctx.Err() == nil && !send(fmt.Sprintf("[%s] %v", st.label, err)) {
+					return
+				}
 				continue
 			}
-			go func() {
+			go func(label string) {
 				defer rc.Close()
 				sc := bufio.NewScanner(rc)
 				sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 				for sc.Scan() {
-					select {
-					case ch <- logLineMsg{key, sc.Text()}:
-					case <-ctx.Done():
+					line := sc.Text()
+					if prefix {
+						line = "[" + label + "] " + line
+					}
+					if !send(line) {
 						return
 					}
 				}
-			}()
+			}(st.label)
 		}
 		<-ctx.Done()
 	}()
@@ -531,21 +550,34 @@ func (m *uiModel) selected() (app, svc string, ok bool) {
 	return "", "", false
 }
 
-// selectedTarget is the full app/service[/container] the row addresses.
-func (m *uiModel) selectedTarget() (string, bool) {
+// selectedRow is the selected service or sidecar row.
+func (m *uiModel) selectedRow() (uiRow, bool) {
 	if m.cursor < 0 || m.cursor >= len(m.rows) || m.rows[m.cursor].header {
-		return "", false
+		return uiRow{}, false
 	}
-	r := m.rows[m.cursor]
+	return m.rows[m.cursor], true
+}
+
+// rowKey is the full app/service[/container] a row addresses.
+func (m *uiModel) rowKey(r uiRow) string {
 	t := r.app + "/" + r.service
 	if r.container != "" {
 		t += "/" + r.container
 	}
-	return t, true
+	return t
+}
+
+// selectedTarget is the full app/service[/container] the row addresses.
+func (m *uiModel) selectedTarget() (string, bool) {
+	r, ok := m.selectedRow()
+	if !ok {
+		return "", false
+	}
+	return m.rowKey(r), true
 }
 
 func (m *uiModel) rebuildRows() {
-	sel, selSvc, hadSel := m.selected()
+	selRow, hadSel := m.selectedRow()
 	byApp := map[string][]string{}
 	seen := map[string]bool{}
 	sidecars := map[string][]string{}
@@ -583,7 +615,7 @@ func (m *uiModel) rebuildRows() {
 	// keep the selection stable across refreshes
 	m.cursor = -1
 	for i, r := range m.rows {
-		if hadSel && r.app == sel && r.service == selSvc {
+		if hadSel && !r.header && r.app == selRow.app && r.service == selRow.service && r.container == selRow.container {
 			m.cursor = i
 			break
 		}
@@ -709,8 +741,8 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.rebuildRows()
 		m.appendHist()
 		var cmds []tea.Cmd
-		if app, svc, ok := m.selected(); ok && m.logKey != app+"/"+svc {
-			cmds = append(cmds, m.startLogStream(app, svc))
+		if r, ok := m.selectedRow(); ok && m.logKey != m.rowKey(r) {
+			cmds = append(cmds, m.startLogStream(r.app, r.service, r.container))
 		}
 		return m, tea.Batch(cmds...)
 
@@ -793,13 +825,13 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		case "j", "down":
 			m.move(1)
-			if app, svc, ok := m.selected(); ok && m.logKey != app+"/"+svc {
-				return m, m.startLogStream(app, svc)
+			if r, ok := m.selectedRow(); ok && m.logKey != m.rowKey(r) {
+				return m, m.startLogStream(r.app, r.service, r.container)
 			}
 		case "k", "up":
 			m.move(-1)
-			if app, svc, ok := m.selected(); ok && m.logKey != app+"/"+svc {
-				return m, m.startLogStream(app, svc)
+			if r, ok := m.selectedRow(); ok && m.logKey != m.rowKey(r) {
+				return m, m.startLogStream(r.app, r.service, r.container)
 			}
 		case "l", "1":
 			m.tab = tabLogs
