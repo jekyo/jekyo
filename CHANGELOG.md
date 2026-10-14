@@ -6,6 +6,30 @@ All notable changes to JEKYO are documented here. The format follows
 may contain breaking changes and patches never do. From 1.0 on, breaking
 changes only land in major versions.
 
+## [0.24.0] - 2026-10-14
+
+### Added
+
+- `http.domains` lets one service answer on several hosts, so an API
+  subdomain or alias no longer needs a proxy service in front of it.
+  `path`, `tls`, `auth`, `websocket` and `redirect` apply to every host.
+  Each host gets its own certificate, so a host whose DNS isn't pointed
+  yet doesn't block the others; the first host keeps `<service>-tls`,
+  so switching from `domain:` to `domains:` doesn't re-issue it (#23).
+
+### Fixed
+
+- `http.domain` must be a valid lowercase DNS name. A value like
+  `"a.com,b.com"` used to render an invalid Ingress host; it now fails
+  validation, as do wildcards (which can't get an HTTP-01 certificate)
+  and a domain claimed by two services in the same file (#23).
+- `jekyo ui` shows logs for services with a sidecar. The logs API
+  rejects a request that names no container on a multi-container pod,
+  and the UI dropped that error, so the pane stayed on "waiting for
+  logs...". It now streams every container (prefixed), a sidecar row
+  streams just that container and stays selected across refreshes, and
+  stream errors appear in the pane.
+
 ## [0.23.0] - 2026-08-12
 
 ### Added

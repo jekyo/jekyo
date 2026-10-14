@@ -32,7 +32,11 @@ services:               # required, at least one
     port: 8080                # main port (sugar for one-element ports:)
     ports: [8080, 9090]       # several ports
     http:                     # publish on a domain via ingress
-      domain: api.example.com # required inside http
+      domain: api.example.com # required inside http (or domains:)
+      domains: [example.com, api.example.com]
+                              # several hosts, one service; exclusive with
+                              # domain:. Every other http field applies to
+                              # each host, and each host gets its own cert
       path: /                 # default /
       tls: true               # default true; automatic certificate
       redirect: example.com   # domain-level redirect answered by the ingress;
@@ -150,7 +154,8 @@ Convert a compose file to jekyo.yaml with these rules:
 | `healthcheck.test: [CMD, x]` | `health.command: [x]` |
 | `healthcheck.test: [CMD-SHELL, x]` | `health.command: [sh, -c, x]` |
 | exposed web service | add `http: {domain: ...}` to it |
-| www/apex redirect rules (nginx/caddy blocks) | a service with only `http: {domain, redirect}` |
+| one service on several hosts (`server_name a b;`, caddy `a, b {}`) | `http: {domains: [a, b]}`; no proxy service needed |
+| www/apex redirect rules (nginx/caddy blocks) | a service with only `http: {domain, redirect}` (or `domains:` for several) |
 | secrets in env | move values to `.env`, reference as `${VAR}` |
 
 Compact multiple data volumes into one volume with subpaths and one size.

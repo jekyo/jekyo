@@ -8,6 +8,7 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	"github.com/jekyo/jekyo/internal/dsl"
 )
@@ -339,5 +340,101 @@ volumes:
 	}
 	if !found {
 		t.Fatal("no backup CronJob compiled")
+	}
+}
+
+func TestCompileDomains(t *testing.T) {
+	y := `
+app: a
+services:
+  web:
+    image: x
+    port: 3000
+    http:
+      domains: [vakyn.com, api.vakyn.com]
+      path: /v1
+      websocket: true
+`
+	objs, err := Compile(mustParse(t, y), Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ing *networkingv1.Ingress
+	for _, o := range objs {
+		if i, ok := o.(*networkingv1.Ingress); ok {
+			ing = i
+		}
+	}
+	if ing == nil {
+		t.Fatal("no ingress found")
+	}
+	if len(ing.Spec.Rules) != 2 {
+		t.Fatalf("want one rule per domain, got %+v", ing.Spec.Rules)
+	}
+	for i, host := range []string{"vakyn.com", "api.vakyn.com"} {
+		r := ing.Spec.Rules[i]
+		p := r.HTTP.Paths[0]
+		if r.Host != host || p.Path != "/v1" || p.Backend.Service.Name != "web" || p.Backend.Service.Port.Number != 3000 {
+			t.Fatalf("rule %d: %+v", i, r)
+		}
+	}
+	// one cert per host: a failed HTTP-01 challenge on one host must not
+	// block the others, and the first host keeps <name>-tls so moving from
+	// domain: to domains: does not re-issue its cert
+	want := []networkingv1.IngressTLS{
+		{Hosts: []string{"vakyn.com"}, SecretName: "web-tls"},
+		{Hosts: []string{"api.vakyn.com"}, SecretName: "web-tls-api-vakyn-com"},
+	}
+	if len(ing.Spec.TLS) != len(want) {
+		t.Fatalf("tls: %+v", ing.Spec.TLS)
+	}
+	for i, w := range want {
+		g := ing.Spec.TLS[i]
+		if g.SecretName != w.SecretName || len(g.Hosts) != 1 || g.Hosts[0] != w.Hosts[0] {
+			t.Fatalf("tls[%d] = %+v, want %+v", i, g, w)
+		}
+	}
+	if ing.Annotations["projectcontour.io/websocket-routes"] != "/v1" {
+		t.Fatalf("websocket annotation: %v", ing.Annotations)
+	}
+}
+
+func TestCompileRedirectDomains(t *testing.T) {
+	y := `
+app: a
+services:
+  apex:
+    http:
+      domains: [acme.com, www.acme.com]
+      redirect: acme.io
+`
+	objs, err := Compile(mustParse(t, y), Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxies := map[string]string{} // HTTPProxy name -> fqdn
+	secrets := map[string]string{} // vhost fqdn -> tls secret
+	certs := map[string]string{}   // cert-request ConfigMap name -> hosts
+	for _, o := range objs {
+		switch v := o.(type) {
+		case *unstructured.Unstructured:
+			vh := v.Object["spec"].(map[string]any)["virtualhost"].(map[string]any)
+			fqdn := vh["fqdn"].(string)
+			proxies[v.GetName()] = fqdn
+			secrets[fqdn] = vh["tls"].(map[string]any)["secretName"].(string)
+		case *corev1.ConfigMap:
+			if v.Labels["kcert.dev/cert-request"] == "request" {
+				certs[v.Name] = v.Data["hosts"]
+			}
+		}
+	}
+	if len(proxies) != 2 || proxies["apex"] != "acme.com" || proxies["apex-www-acme-com"] != "www.acme.com" {
+		t.Fatalf("proxies: %v", proxies)
+	}
+	if secrets["acme.com"] != "apex-tls" || secrets["www.acme.com"] != "apex-tls-www-acme-com" {
+		t.Fatalf("secrets: %v", secrets)
+	}
+	if len(certs) != 2 || certs["apex-tls"] != "acme.com" || certs["apex-tls-www-acme-com"] != "www.acme.com" {
+		t.Fatalf("cert requests: %v", certs)
 	}
 }

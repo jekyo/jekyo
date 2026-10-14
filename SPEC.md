@@ -183,7 +183,7 @@ services:
       API_KEY: ${API_KEY}           # interpolated from local env / --env-file
     port: 8080                      # main port; `ports:` for multiple
     http:                           # ingress in four lines
-      domain: api.acme.com
+      domain: api.acme.com          # or domains: [acme.com, api.acme.com]
       path: /                       # default
       tls: true                     # default when server has --domain/issuer
       auth: basic                   # optional htpasswd auth at the edge

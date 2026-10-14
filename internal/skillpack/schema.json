@@ -142,12 +142,21 @@
         "http": {
           "type": "object",
           "additionalProperties": false,
-          "required": [
-            "domain"
+          "oneOf": [
+            { "required": ["domain"] },
+            { "required": ["domains"] }
           ],
           "properties": {
             "domain": {
-              "type": "string"
+              "type": "string",
+              "description": "Host the route answers on: a lowercase DNS name, no wildcards."
+            },
+            "domains": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": { "type": "string" },
+              "description": "Several hosts for one service, exclusive with domain. Every other http field applies to each host; each host gets its own certificate."
             },
             "path": {
               "type": "string",
@@ -165,7 +174,7 @@
             },
             "redirect": {
               "type": "string",
-              "description": "Answer requests to this domain with a permanent redirect to the given host or URL; the service runs no container and must define nothing else."
+              "description": "Answer requests to this domain (or each of domains) with a permanent redirect to the given host or URL; the service runs no container and must define nothing else."
             },
             "websocket": {
               "oneOf": [

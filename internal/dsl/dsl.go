@@ -124,7 +124,10 @@ type Build struct {
 
 type HTTP struct {
 	Domain string `yaml:"domain"`
-	Path   string `yaml:"path"`
+	// Domains publishes the route on several hosts (issue #23); exclusive
+	// with Domain. Every other field applies to each host.
+	Domains []string `yaml:"domains"`
+	Path    string   `yaml:"path"`
 	// TLS defaults to true; certificates are issued automatically when the
 	// server was installed with a domain.
 	TLS  *bool  `yaml:"tls"`
@@ -138,6 +141,14 @@ type HTTP struct {
 	// paths are named in projectcontour.io/websocket-routes (issue #22).
 	// true enables it on the route's path; a list names specific paths.
 	WebSocket WebSocket `yaml:"websocket"`
+}
+
+// Hosts returns the hosts the route answers on, in declaration order.
+func (h *HTTP) Hosts() []string {
+	if h.Domain != "" {
+		return []string{h.Domain}
+	}
+	return h.Domains
 }
 
 // WebSocket is either a bool (websocket: true) or a list of paths

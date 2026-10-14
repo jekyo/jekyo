@@ -11,6 +11,7 @@ import (
 
 	"github.com/goccy/go-yaml"
 	"k8s.io/apimachinery/pkg/api/resource"
+	"k8s.io/apimachinery/pkg/util/validation"
 )
 
 // Parse reads a jekyo.yaml. env provides values for ${VAR} interpolation
@@ -160,6 +161,7 @@ func validate(app *App) error {
 		bad("inputs: this file is a template with unresolved inputs — start from it with 'jekyo init'")
 	}
 
+	hostOwner := map[string]string{} // http host -> service, across the file
 	for _, name := range sortedKeys(app.Services) {
 		svc := app.Services[name]
 		p := "service " + name
@@ -172,7 +174,7 @@ func validate(app *App) error {
 			if svc.Image != "" || svc.Build != nil || len(svc.AllPorts()) > 0 ||
 				len(svc.Volumes) > 0 || len(svc.Env) > 0 || svc.Schedule != "" ||
 				len(svc.Expose) > 0 || svc.Health != nil || svc.GPU.Count > 0 {
-				bad("%s: http.redirect services define only http.domain and http.redirect", p)
+				bad("%s: http.redirect services define only http.domain(s) and http.redirect", p)
 			}
 		} else {
 			if svc.Image == "" && svc.Build == nil {
@@ -188,8 +190,25 @@ func validate(app *App) error {
 			}
 		}
 		if svc.HTTP != nil {
-			if svc.HTTP.Domain == "" {
-				bad("%s: http.domain is required", p)
+			if svc.HTTP.Domain != "" && svc.HTTP.Domains != nil {
+				bad("%s: http.domain and http.domains are mutually exclusive", p)
+			} else if svc.HTTP.Domain == "" && len(svc.HTTP.Domains) == 0 {
+				bad("%s: http.domain (or a non-empty http.domains list) is required", p)
+			}
+			for _, host := range svc.HTTP.Hosts() {
+				// kcert issues over HTTP-01 only, so wildcards can never
+				// get a certificate; a comma would render an invalid host
+				if errs := validation.IsDNS1123Subdomain(host); len(errs) > 0 {
+					bad("%s: %q is not a valid domain (lowercase DNS name, no wildcards)", p, host)
+				} else if other, dup := hostOwner[host]; dup {
+					if other == name {
+						bad("%s: %s is listed twice", p, host)
+					} else {
+						bad("%s: %s is also served by service %s", p, host, other)
+					}
+				} else {
+					hostOwner[host] = name
+				}
 			}
 			if !isRedirect && svc.MainPort() == 0 {
 				bad("%s: http requires a port", p)

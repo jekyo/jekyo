@@ -136,7 +136,9 @@ func newUpCmd() *cobra.Command {
 					if svc.HTTP.TLS != nil && !*svc.HTTP.TLS {
 						scheme = "http"
 					}
-					cmd.Printf("  %s: %s://%s\n", name, scheme, svc.HTTP.Domain)
+					for _, host := range svc.HTTP.Hosts() {
+						cmd.Printf("  %s: %s://%s\n", name, scheme, host)
+					}
 				}
 			}
 			cmd.Println("Watch progress with: jekyo ps", app.Name)

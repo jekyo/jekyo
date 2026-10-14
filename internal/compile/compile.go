@@ -92,7 +92,9 @@ func Compile(app *dsl.App, opts Options) ([]runtime.Object, error) {
 		svc := app.Services[name]
 		if svc.HTTP != nil && svc.HTTP.Redirect != "" {
 			// pure routing rule: the ingress answers, nothing runs
-			objs = append(objs, redirectObjects(app, name, svc.HTTP)...)
+			for i, host := range svc.HTTP.Hosts() {
+				objs = append(objs, redirectObjects(app, name, i, host, svc.HTTP)...)
+			}
 			continue
 		}
 		if svc.Image == "" {
@@ -834,41 +836,59 @@ func ingress(app *dsl.App, name string, svc dsl.Service) *networkingv1.Ingress {
 	ing := &networkingv1.Ingress{
 		TypeMeta:   metav1.TypeMeta{APIVersion: "networking.k8s.io/v1", Kind: "Ingress"},
 		ObjectMeta: meta,
-		Spec: networkingv1.IngressSpec{
-			Rules: []networkingv1.IngressRule{{
-				Host: h.Domain,
-				IngressRuleValue: networkingv1.IngressRuleValue{
-					HTTP: &networkingv1.HTTPIngressRuleValue{
-						Paths: []networkingv1.HTTPIngressPath{{
-							Path:     path,
-							PathType: &pathType,
-							Backend: networkingv1.IngressBackend{
-								Service: &networkingv1.IngressServiceBackend{
-									Name: name,
-									Port: networkingv1.ServiceBackendPort{Number: int32(svc.MainPort())},
-								},
-							},
-						}},
-					},
-				},
-			}},
-		},
 	}
-	if tls {
-		// The kcert label is the CertProvider seam (SPEC §2.2): kcert
-		// watches labeled ingresses and issues into the named secret.
-		ing.Labels[kcertLabel] = "managed"
-		ing.Spec.TLS = []networkingv1.IngressTLS{{Hosts: []string{h.Domain}, SecretName: name + "-tls"}}
+	for i, host := range h.Hosts() {
+		ing.Spec.Rules = append(ing.Spec.Rules, networkingv1.IngressRule{
+			Host: host,
+			IngressRuleValue: networkingv1.IngressRuleValue{
+				HTTP: &networkingv1.HTTPIngressRuleValue{
+					Paths: []networkingv1.HTTPIngressPath{{
+						Path:     path,
+						PathType: &pathType,
+						Backend: networkingv1.IngressBackend{
+							Service: &networkingv1.IngressServiceBackend{
+								Name: name,
+								Port: networkingv1.ServiceBackendPort{Number: int32(svc.MainPort())},
+							},
+						},
+					}},
+				},
+			},
+		})
+		if tls {
+			// The kcert label is the CertProvider seam (SPEC §2.2): kcert
+			// watches labeled ingresses and issues into the named secret.
+			ing.Labels[kcertLabel] = "managed"
+			ing.Spec.TLS = append(ing.Spec.TLS, networkingv1.IngressTLS{
+				Hosts: []string{host}, SecretName: tlsSecretName(name, i, host),
+			})
+		}
 	}
 	return ing
 }
+
+// tlsSecretName names the cert secret for the i-th host of a service.
+// Each host gets its own secret: kcert puts every host sharing a secret
+// into one ACME order, so one host failing HTTP-01 would leave all of
+// them without a cert. The first host keeps <name>-tls so moving from
+// domain: to domains: does not re-issue its cert.
+func tlsSecretName(name string, i int, host string) string {
+	if i == 0 {
+		return name + "-tls"
+	}
+	return name + "-tls-" + hostSlug(host)
+}
+
+// hostSlug turns a validated DNS name into a DNS label fragment.
+func hostSlug(host string) string { return strings.ReplaceAll(host, ".", "-") }
 
 // redirectObjects compiles http.redirect into an Envoy-native redirect:
 // a Contour HTTPProxy with a requestRedirectPolicy, plus a kcert
 // cert-request ConfigMap so the domain still gets a certificate. kcert
 // names the issued Secret after the ConfigMap, so <name>-tls matches what
-// an Ingress-managed cert for this service would have used.
-func redirectObjects(app *dsl.App, name string, h *dsl.HTTP) []runtime.Object {
+// an Ingress-managed cert for this service would have used. A service
+// with several domains gets one HTTPProxy and cert per host (i-th host).
+func redirectObjects(app *dsl.App, name string, i int, host string, h *dsl.HTTP) []runtime.Object {
 	tls := h.TLS == nil || *h.TLS
 	scheme, target := "https", h.Redirect
 	if s, rest, ok := strings.Cut(target, "://"); ok {
@@ -880,24 +900,29 @@ func redirectObjects(app *dsl.App, name string, h *dsl.HTTP) []runtime.Object {
 	for k, v := range labels(app, name) {
 		lbl[k] = v
 	}
-	vhost := map[string]any{"fqdn": h.Domain}
+	proxyName := name
+	if i > 0 {
+		proxyName = name + "-" + hostSlug(host)
+	}
+	vhost := map[string]any{"fqdn": host}
 	var objs []runtime.Object
 	if tls {
-		vhost["tls"] = map[string]any{"secretName": name + "-tls"}
+		secret := tlsSecretName(name, i, host)
+		vhost["tls"] = map[string]any{"secretName": secret}
 		objs = append(objs, &corev1.ConfigMap{
 			TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "ConfigMap"},
 			ObjectMeta: metav1.ObjectMeta{
-				Name: name + "-tls", Namespace: NamespaceFor(app.Name),
+				Name: secret, Namespace: NamespaceFor(app.Name),
 				Labels: mergeLabels(labels(app, name), map[string]string{"kcert.dev/cert-request": "request"}),
 			},
-			Data: map[string]string{"hosts": h.Domain},
+			Data: map[string]string{"hosts": host},
 		})
 	}
 	objs = append(objs, &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "projectcontour.io/v1",
 		"kind":       "HTTPProxy",
 		"metadata": map[string]any{
-			"name": name, "namespace": NamespaceFor(app.Name), "labels": lbl,
+			"name": proxyName, "namespace": NamespaceFor(app.Name), "labels": lbl,
 		},
 		"spec": map[string]any{
 			"virtualhost": vhost,
