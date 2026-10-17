@@ -90,3 +90,25 @@ func TestUISidecarRowLogs(t *testing.T) {
 		t.Error("sidecar row should show the sidecar's logs only")
 	}
 }
+
+// nvidia-smi prints one line per GPU; all of them are kept (an 8x V100
+// box showed only GPU 0).
+func TestParseGPUs(t *testing.T) {
+	out := "0, 512, 32768, 34\n87, 30000, 32768, 61\n"
+	g := parseGPUs(out)
+	if len(g) != 2 || g[0].util != 0 || g[1].util != 87 || g[1].memUsed != 30000 || g[1].memTot != 32768 || g[1].temp != 61 {
+		t.Fatalf("got %+v", g)
+	}
+	if g := parseGPUs("none"); len(g) != 0 {
+		t.Fatalf("no GPU: %+v", g)
+	}
+
+	m := &uiModel{ctxName: "test", width: 150, height: 46,
+		snap: &topSnapshot{Nodes: []topNode{{Name: "n1"}}},
+		logs: map[string][]string{}, hist: map[string][]histPt{}, events: map[string][]string{},
+		gpus: parseGPUs(out), gpuProbed: true}
+	m.rebuildRows()
+	if v := m.View(); !strings.Contains(v, "30000Mi/32768Mi") || !strings.Contains(v, "512Mi/32768Mi") {
+		t.Error("view should render every GPU")
+	}
+}

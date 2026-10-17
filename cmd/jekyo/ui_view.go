@@ -477,13 +477,14 @@ func (m *uiModel) viewHeader() string {
 	}
 	// gpu shares the net column; both are short
 	var gpuRows []string
-	if m.gpu.present {
-		gp := float64(m.gpu.util)
-		gpuRows = []string{fmt.Sprintf("%s %3.0f%%  %s  %s",
-			bar(gp, netW-32), gp,
-			uiDimStyle.Render(fmt.Sprintf("%dMi/%dMi", m.gpu.memUsed, m.gpu.memTot)),
-			uiDimStyle.Render(fmt.Sprintf("%d°C", m.gpu.temp)))}
-	} else {
+	for i, g := range m.gpus {
+		gp := float64(g.util)
+		gpuRows = append(gpuRows, fmt.Sprintf("%s %s %3.0f%%  %s  %s",
+			uiDimStyle.Render(fmt.Sprintf("%d", i)), bar(gp, netW-34), gp,
+			uiDimStyle.Render(fmt.Sprintf("%dMi/%dMi", g.memUsed, g.memTot)),
+			uiDimStyle.Render(fmt.Sprintf("%d°C", g.temp))))
+	}
+	if len(gpuRows) == 0 {
 		gpuRows = []string{uiDimStyle.Render("no GPU available")}
 	}
 

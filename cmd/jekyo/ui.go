@@ -28,21 +28,22 @@ import (
 // ---- messages ----
 
 type snapMsg struct {
-	snap     *topSnapshot
-	load     string     // "3.89 4.14 4.49" or empty
-	uptime   string     // "12d" or empty
-	cores    []float64  // per-core utilization 0-100
-	mounts   []mountRow // real filesystems with usage
-	tempC    int        // package temperature, 0 = unknown
-	mem      memInfo
-	gpu      gpuInfo
-	io       ioRates
-	swapT    int64
-	swapU    int64
-	updTotal int
-	updSec   int
-	reboot   bool
-	sshFails int
+	snap      *topSnapshot
+	load      string     // "3.89 4.14 4.49" or empty
+	uptime    string     // "12d" or empty
+	cores     []float64  // per-core utilization 0-100
+	mounts    []mountRow // real filesystems with usage
+	tempC     int        // package temperature, 0 = unknown
+	mem       memInfo
+	gpus      []gpuInfo // one per nvidia-smi line
+	gpuProbed bool
+	io        ioRates
+	swapT     int64
+	swapU     int64
+	updTotal  int
+	updSec    int
+	reboot    bool
+	sshFails  int
 }
 
 type ioRates struct {
@@ -50,9 +51,26 @@ type ioRates struct {
 }
 
 type gpuInfo struct {
-	present                     bool
-	probed                      bool
 	util, memUsed, memTot, temp int
+}
+
+// parseGPUs reads nvidia-smi's csv (utilization, memory used, memory
+// total, temperature), one line per GPU; "none" or garbage yields none.
+func parseGPUs(out string) []gpuInfo {
+	var gpus []gpuInfo
+	for _, l := range strings.Split(strings.TrimSpace(out), "\n") {
+		f := strings.Split(l, ",")
+		if len(f) < 4 {
+			continue
+		}
+		var g gpuInfo
+		fmt.Sscanf(strings.TrimSpace(f[0]), "%d", &g.util)
+		fmt.Sscanf(strings.TrimSpace(f[1]), "%d", &g.memUsed)
+		fmt.Sscanf(strings.TrimSpace(f[2]), "%d", &g.memTot)
+		fmt.Sscanf(strings.TrimSpace(f[3]), "%d", &g.temp)
+		gpus = append(gpus, g)
+	}
+	return gpus
 }
 
 type memInfo struct {
@@ -154,7 +172,8 @@ type uiModel struct {
 	mounts     []mountRow
 	tempC      int
 	mem        memInfo
-	gpu        gpuInfo
+	gpus       []gpuInfo
+	gpuProbed  bool
 	io         ioRates
 	updTotal   int
 	updSec     int
@@ -318,18 +337,8 @@ func (m *uiModel) gatherCmd() tea.Cmd {
 					fmt.Sscanf(strings.TrimSpace(parts[8]), "%d", &msg.sshFails)
 				}
 				if len(parts) > 5 {
-					g := strings.TrimSpace(parts[5])
-					msg.gpu.probed = true
-					if g != "" && g != "none" {
-						f := strings.Split(strings.Split(g, "\n")[0], ",")
-						if len(f) >= 4 {
-							msg.gpu.present = true
-							fmt.Sscanf(strings.TrimSpace(f[0]), "%d", &msg.gpu.util)
-							fmt.Sscanf(strings.TrimSpace(f[1]), "%d", &msg.gpu.memUsed)
-							fmt.Sscanf(strings.TrimSpace(f[2]), "%d", &msg.gpu.memTot)
-							fmt.Sscanf(strings.TrimSpace(f[3]), "%d", &msg.gpu.temp)
-						}
-					}
+					msg.gpuProbed = true
+					msg.gpus = parseGPUs(parts[5])
 				}
 			}
 		}
@@ -731,8 +740,8 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.mem.total > 0 {
 			m.mem = msg.mem
 		}
-		if msg.gpu.probed {
-			m.gpu = msg.gpu
+		if msg.gpuProbed {
+			m.gpus = msg.gpus
 		}
 		m.io = msg.io
 		m.swapT, m.swapU = msg.swapT, msg.swapU
