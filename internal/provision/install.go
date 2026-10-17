@@ -54,9 +54,26 @@ func (in *Installer) step(name string, fn func() error) error {
 func (in *Installer) GatherFacts() (Facts, error) {
 	out, err := in.SSH.Run(factsScript(in.Cfg.StoragePath))
 	if err != nil {
+		if e := sudoError(in.SSH.User(), in.SSH.Host(), err); e != err {
+			return Facts{}, e
+		}
 		return Facts{}, fmt.Errorf("gathering server facts: %w", err)
 	}
 	return ParseFacts(out), nil
+}
+
+// sudoError explains a sudo password prompt. Every remote command runs
+// through sudo -n, which fails rather than prompt; the raw output names
+// only the tail of the command, so say what to change instead.
+func sudoError(user, host string, err error) error {
+	msg := err.Error()
+	if !strings.Contains(msg, "sudo: a password is required") &&
+		!strings.Contains(msg, "sudo: interactive authentication is required") {
+		return err
+	}
+	return fmt.Errorf("%s@%s needs passwordless sudo. On the server run:\n"+
+		"  echo '%s ALL=(ALL) NOPASSWD:ALL' | sudo tee /etc/sudoers.d/90-jekyo && sudo chmod 440 /etc/sudoers.d/90-jekyo\n"+
+		"or connect as root@%s", user, host, user, host)
 }
 
 // RemoveDocker purges the Docker engine. purgeData additionally deletes

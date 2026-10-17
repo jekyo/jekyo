@@ -26,6 +26,18 @@ type Client struct {
 	mu   sync.Mutex
 }
 
+// User is the login user.
+func (c *Client) User() string { return c.user }
+
+// Host is the server address the connection reached.
+func (c *Client) Host() string {
+	host, _, err := net.SplitHostPort(c.conn.RemoteAddr().String())
+	if err != nil {
+		return c.conn.RemoteAddr().String()
+	}
+	return host
+}
+
 // Target is a parsed user@host[:port] spec.
 type Target struct {
 	User string

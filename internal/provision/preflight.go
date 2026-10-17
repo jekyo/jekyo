@@ -44,6 +44,8 @@ var k3sProcesses = map[string]bool{
 	"svclb": true, "wg": true,
 }
 
+var testedUbuntu = map[string]bool{"20.04": true, "22.04": true, "24.04": true, "26.04": true}
+
 // Preflight evaluates all checks against gathered facts. Pure function:
 // easy to unit-test with synthetic facts.
 func Preflight(f Facts, cfg Config) []CheckResult {
@@ -58,8 +60,8 @@ func Preflight(f Facts, cfg Config) []CheckResult {
 	// OS / privileges / capacity.
 	if f.OSID != "ubuntu" {
 		add("os", Fail, fmt.Sprintf("Ubuntu required, found %q", f.OSID))
-	} else if f.OSVersion != "20.04" && f.OSVersion != "22.04" && f.OSVersion != "24.04" {
-		add("os", Warn, fmt.Sprintf("untested Ubuntu %s (tested: 20.04/22.04/24.04)", f.OSVersion))
+	} else if !testedUbuntu[f.OSVersion] {
+		add("os", Warn, fmt.Sprintf("untested Ubuntu %s (tested: 20.04/22.04/24.04/26.04)", f.OSVersion))
 	} else {
 		add("os", Pass, "Ubuntu "+f.OSVersion)
 	}
@@ -89,6 +91,13 @@ func Preflight(f Facts, cfg Config) []CheckResult {
 		}
 	} else {
 		add("disk", Pass, fmt.Sprintf("%d GB free at %s", f.DiskFreeMB/1024, cfg.StoragePath))
+	}
+
+	if l := f.LVM; l != nil && l.VGFreeBytes >= 10<<30 {
+		// Growing a disk is never bundled into --fix: the free extents may
+		// be reserved for something else, and ext4 cannot shrink online.
+		add("disk: volume group", Warn, fmt.Sprintf("%s is %d GB but its volume group has %d GB unallocated — grow it with: lvextend -r -l +100%%FREE %s",
+			cfg.StoragePath, l.LVBytes>>30, l.VGFreeBytes>>30, l.Device))
 	}
 
 	// Ports.
@@ -163,6 +172,41 @@ func Preflight(f Facts, cfg Config) []CheckResult {
 		} else {
 			add("wireguard module", Warn, "unavailable — VPN addon will be skipped")
 		}
+	}
+	if cfg.IP != "" && len(f.Addrs) > 0 {
+		local := false
+		for _, a := range f.Addrs {
+			local = local || a == cfg.IP
+		}
+		if local {
+			add("node ip", Pass, cfg.IP+" is on a local interface")
+		} else {
+			// k3s advertises this address and the kubelet validates it
+			// against the interfaces; when it is missing the node cannot
+			// reach its own API server and every pod loses the network.
+			add("node ip", Warn, fmt.Sprintf("--ip %s is not on any interface (have %s) — typo, or a NAT address k3s cannot bind",
+				cfg.IP, strings.Join(f.Addrs, ", ")))
+		}
+	}
+	if len(f.AptMissing) > 0 {
+		var files, fixes []string
+		for _, a := range f.AptMissing {
+			files = append(files, a.File+" → "+a.Path)
+			fixes = append(fixes, "mv "+a.File+" "+a.File+".disabled")
+		}
+		// apt-get update fails outright on these; only the GPU path runs it
+		st := Warn
+		if !cfg.NoGPU && len(f.GPUs) > 0 {
+			st = Fail
+		}
+		addFix("apt sources", st, "local repo missing, apt-get update will fail: "+strings.Join(files, "; ")+" (fix disables the source)",
+			strings.Join(fixes, " && "))
+	} else {
+		add("apt sources", Pass, "no broken local repos")
+	}
+	if !cfg.NoVPN && f.WGQuickAppArmor {
+		addFix("apparmor: wg-quick", Warn, "Ubuntu's wg-quick profile also confines the VPN container's wg-quick and it crash-loops (fix disables only that profile)",
+			"ln -sf /etc/apparmor.d/wg-quick /etc/apparmor.d/disable/wg-quick && apparmor_parser -R /etc/apparmor.d/wg-quick")
 	}
 	if f.SwapActive {
 		add("swap", Warn, "enabled — k3s tolerates it, memory limits get fuzzy")

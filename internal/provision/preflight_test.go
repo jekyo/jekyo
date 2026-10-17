@@ -1,6 +1,7 @@
 package provision
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
@@ -43,6 +44,12 @@ ok
 SecureBoot enabled
 ===JEKYO===nouveau
 1
+===JEKYO===aptmissing
+===JEKYO===apparmor
+===JEKYO===addrs
+127.0.0.1
+203.0.113.7
+===JEKYO===lvm
 ===JEKYO===end
 `
 
@@ -144,5 +151,98 @@ func TestPreflightConvergeExistingK3s(t *testing.T) {
 	}
 	if Blocking(results) {
 		t.Fatal("converge case must not block")
+	}
+}
+
+// gotchas swaps sections of the sample for the failures met installing
+// real servers: a stale local apt repo, Ubuntu 26.04's wg-quick AppArmor
+// profile, a root LV far smaller than its volume group.
+func gotchas(t *testing.T) Facts {
+	t.Helper()
+	out := strings.Replace(sampleFactsOutput, "===JEKYO===aptmissing\n",
+		"===JEKYO===aptmissing\n/etc/apt/sources.list.d/nvidia-driver-local.list /var/nvidia-driver-local-repo\n", 1)
+	out = strings.Replace(out, "===JEKYO===apparmor\n", "===JEKYO===apparmor\nwg-quick (enforce)\n", 1)
+	out = strings.Replace(out, "===JEKYO===lvm\n",
+		"===JEKYO===lvm\n/dev/mapper/ubuntu--vg-ubuntu--lv 107374182400 1846835822592\n", 1)
+	out = strings.Replace(out, `VERSION_ID="24.04"`, `VERSION_ID="26.04"`, 1)
+	return ParseFacts(out)
+}
+
+func TestParseFactsGotchas(t *testing.T) {
+	f := gotchas(t)
+	if len(f.AptMissing) != 1 || f.AptMissing[0].File != "/etc/apt/sources.list.d/nvidia-driver-local.list" ||
+		f.AptMissing[0].Path != "/var/nvidia-driver-local-repo" {
+		t.Fatalf("apt: %+v", f.AptMissing)
+	}
+	if !f.WGQuickAppArmor {
+		t.Fatal("wg-quick apparmor profile not parsed")
+	}
+	if len(f.Addrs) != 2 || f.Addrs[1] != "203.0.113.7" {
+		t.Fatalf("addrs: %v", f.Addrs)
+	}
+	if f.LVM == nil || f.LVM.Device != "/dev/mapper/ubuntu--vg-ubuntu--lv" ||
+		f.LVM.LVBytes != 107374182400 || f.LVM.VGFreeBytes != 1846835822592 {
+		t.Fatalf("lvm: %+v", f.LVM)
+	}
+	clean := ParseFacts(sampleFactsOutput)
+	if len(clean.AptMissing) != 0 || clean.WGQuickAppArmor || clean.LVM != nil {
+		t.Fatalf("clean sample parsed gotchas: %+v", clean)
+	}
+}
+
+func TestPreflightGotchas(t *testing.T) {
+	results := Preflight(gotchas(t), Config{IP: "203.0.113.7", StoragePath: "/storage"})
+
+	if r := findCheck(t, results, "os"); r.Status != Pass {
+		t.Fatalf("26.04 installs cleanly once the apparmor fix runs: %+v", r)
+	}
+	// apt-get update fails on the missing repo, and the GPU path runs it
+	r := findCheck(t, results, "apt sources")
+	if r.Status != Fail || !r.Fixable || !strings.Contains(r.Detail, "nvidia-driver-local.list") ||
+		r.FixCmd != "mv /etc/apt/sources.list.d/nvidia-driver-local.list /etc/apt/sources.list.d/nvidia-driver-local.list.disabled" {
+		t.Fatalf("apt sources: %+v", r)
+	}
+	if r := findCheck(t, results, "apparmor: wg-quick"); r.Status != Warn || !r.Fixable ||
+		!strings.Contains(r.FixCmd, "apparmor_parser -R /etc/apparmor.d/wg-quick") {
+		t.Fatalf("apparmor: %+v", r)
+	}
+	// growing a disk is never bundled into --fix: report the command only
+	if r := findCheck(t, results, "disk: volume group"); r.Status != Warn || r.Fixable ||
+		!strings.Contains(r.Detail, "lvextend -r -l +100%FREE /dev/mapper/ubuntu--vg-ubuntu--lv") {
+		t.Fatalf("lvm: %+v", r)
+	}
+	if r := findCheck(t, results, "node ip"); r.Status != Pass {
+		t.Fatalf("node ip on an interface: %+v", r)
+	}
+}
+
+func TestPreflightGotchasScoped(t *testing.T) {
+	// no GPU work: apt is not run, so a broken source only warns; no VPN:
+	// the wg-quick profile is irrelevant
+	results := Preflight(gotchas(t), Config{IP: "198.51.100.9", StoragePath: "/storage", NoGPU: true, NoVPN: true})
+	if r := findCheck(t, results, "apt sources"); r.Status != Warn {
+		t.Fatalf("apt sources without GPU: %+v", r)
+	}
+	for _, r := range results {
+		if r.Name == "apparmor: wg-quick" {
+			t.Fatalf("apparmor check without VPN: %+v", r)
+		}
+	}
+	// k3s validates the node IP against local interfaces (the trixy outage)
+	if r := findCheck(t, results, "node ip"); r.Status != Warn || !strings.Contains(r.Detail, "198.51.100.9") {
+		t.Fatalf("node ip: %+v", r)
+	}
+}
+
+func TestSudoError(t *testing.T) {
+	err := sudoError("jekyo", "193.168.140.82", errors.New("remote command failed: true: sudo: interactive authentication is required"))
+	for _, want := range []string{"jekyo@193.168.140.82", "passwordless sudo", "NOPASSWD", "root@"} {
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Fatalf("missing %q in: %v", want, err)
+		}
+	}
+	other := errors.New("remote command failed: connection reset")
+	if got := sudoError("jekyo", "h", other); got != other {
+		t.Fatalf("non-sudo errors pass through, got %v", got)
 	}
 }

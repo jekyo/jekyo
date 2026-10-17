@@ -28,6 +28,29 @@ type Facts struct {
 	GPUs        []string // lspci lines
 	SecureBoot  bool
 	Nouveau     bool
+	// AptMissing lists file: apt sources whose directory is gone, e.g. a
+	// removed NVIDIA local driver repo: apt-get update fails on them.
+	AptMissing []AptSource
+	// WGQuickAppArmor: Ubuntu 26.04's apparmor ships an enforcing wg-quick
+	// profile that attaches by path, so it also confines the VPN
+	// container's wg-quick and blocks it from running busybox.
+	WGQuickAppArmor bool
+	Addrs           []string  // IPs on the server's interfaces
+	LVM             *LVMFacts // set when the storage path sits on an LV
+}
+
+type AptSource struct {
+	File string // the sources file that references it
+	Path string // the missing local repo directory
+}
+
+// LVMFacts sizes the logical volume holding the storage path. Ubuntu's
+// installer gives the root LV 100 GB however big the disk, leaving the
+// rest unallocated in the volume group.
+type LVMFacts struct {
+	Device      string
+	LVBytes     int64
+	VGFreeBytes int64
 }
 
 type DockerFacts struct {
@@ -67,6 +90,10 @@ p swap; swapon --noheadings 2>/dev/null | wc -l
 p gpu; lspci 2>/dev/null | grep -i 'nvidia' | grep -iE 'vga|3d'; true
 p secureboot; mokutil --sb-state 2>/dev/null; true
 p nouveau; lsmod | grep -c '^nouveau '; true
+p aptmissing; for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do [ -f "$f" ] || continue; grep -vE '^[[:space:]]*#' "$f" | grep -oE 'file:/[^] ]+' | while read -r u; do d=${u#file:}; [ -d "$d" ] || echo "$f $d"; done; done; true
+p apparmor; grep -E '^wg-quick \(enforce\)' /sys/kernel/security/apparmor/profiles 2>/dev/null; true
+p addrs; ip -o addr show 2>/dev/null | awk '{print $4}' | cut -d/ -f1
+p lvm; src=$(df -P "$d" | tail -1 | awk '{print $1}'); sz=$(lvs --noheadings --nosuffix --units b -o lv_size,vg_free "$src" 2>/dev/null) && echo "$src $sz"; true
 p end
 true`
 }
@@ -136,6 +163,22 @@ func ParseFacts(out string) Facts {
 	f.SecureBoot = strings.Contains(sections["secureboot"], "SecureBoot enabled")
 	if n, _ := strconv.Atoi(sections["nouveau"]); n > 0 {
 		f.Nouveau = true
+	}
+	for _, l := range strings.Split(sections["aptmissing"], "\n") {
+		if file, path, ok := strings.Cut(strings.TrimSpace(l), " "); ok {
+			f.AptMissing = append(f.AptMissing, AptSource{File: file, Path: path})
+		}
+	}
+	f.WGQuickAppArmor = sections["apparmor"] != ""
+	if s := sections["addrs"]; s != "" {
+		f.Addrs = strings.Fields(s)
+	}
+	if fields := strings.Fields(sections["lvm"]); len(fields) == 3 {
+		lv, err1 := strconv.ParseInt(fields[1], 10, 64)
+		free, err2 := strconv.ParseInt(fields[2], 10, 64)
+		if err1 == nil && err2 == nil {
+			f.LVM = &LVMFacts{Device: fields[0], LVBytes: lv, VGFreeBytes: free}
+		}
 	}
 	return f
 }

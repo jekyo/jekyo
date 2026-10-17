@@ -6,6 +6,27 @@ All notable changes to JEKYO are documented here. The format follows
 may contain breaking changes and patches never do. From 1.0 on, breaking
 changes only land in major versions.
 
+## [0.24.1] - 2026-10-17
+
+### Added
+
+- Preflight catches what broke real installs: a `file:` apt source whose
+  directory is gone (apt-get update fails, so the GPU toolkit install
+  does; `--fix` disables the source), Ubuntu 26.04's `wg-quick` AppArmor
+  profile, which also confines the VPN container and crash-loops it
+  (`--fix` disables only that profile), an `--ip` that is on no
+  interface, and a storage volume far smaller than its volume group
+  (reported with the `lvextend -r` command, never applied by `--fix`).
+  Ubuntu 26.04 is now tested.
+
+### Fixed
+
+- `jekyo ui` shows every GPU. It kept only the first line of
+  `nvidia-smi`, so an 8-GPU server showed one.
+- A login user without passwordless sudo gets an error naming the user
+  and host with the sudoers fix, instead of `true: sudo: interactive
+  authentication is required`.
+
 ## [0.24.0] - 2026-10-14
 
 ### Added
