@@ -37,6 +37,16 @@ type Deployer struct {
 func (d *Deployer) Apply(ctx context.Context, appName string, objs []runtime.Object) (int, error) {
 	applied := map[string]bool{} // "resource/namespace/name"
 
+	if mine := routeHosts(objs); len(mine) > 0 {
+		owners, err := d.hostOwners(ctx, appName)
+		if err != nil {
+			return 0, err
+		}
+		if err := hostConflicts(appName, mine, owners); err != nil {
+			return 0, err
+		}
+	}
+
 	for _, obj := range objs {
 		u, err := toUnstructured(obj)
 		if err != nil {
