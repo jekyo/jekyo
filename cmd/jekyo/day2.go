@@ -608,6 +608,10 @@ func newStatusCmd() *cobra.Command {
 				if cj.Status.LastScheduleTime != nil {
 					lastRun = ago(cj.Status.LastScheduleTime.Time)
 				}
+				if why := cj.Annotations[compile.BackupSuspendedAnnotation]; why != "" && cj.Spec.Suspend != nil && *cj.Spec.Suspend {
+					fmt.Fprintf(w, "  %s\tcronjob\tsuspended: %s\n", cj.Name, why)
+					continue
+				}
 				fmt.Fprintf(w, "  %s\tcronjob\t%s, last run %s\n", cj.Name, cj.Spec.Schedule, lastRun)
 			}
 			w.Flush()

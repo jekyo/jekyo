@@ -106,26 +106,35 @@ func newUpCmd() *cobra.Command {
 			if err := ensureBuilt(cmd, app, file, m); err != nil {
 				return err
 			}
-			objs, err := compile.Compile(app, compile.Options{PullSecrets: pullSecrets(m)})
-			if err != nil {
-				return err
-			}
 			d, err := newDeployer()
 			if err != nil {
 				return err
 			}
 			ctx, cancel := context.WithTimeout(cmd.Context(), deployTimeout)
 			defer cancel()
+			var backedUp []string
+			for _, name := range sortedVolumeNames(app) {
+				if app.Volumes[name].Backup != nil {
+					backedUp = append(backedUp, name)
+				}
+			}
+			hasTarget := true
+			if len(backedUp) > 0 {
+				if hasTarget, err = d.HasBackupTarget(ctx); err != nil {
+					return err
+				}
+			}
+			objs, err := compile.Compile(app, compile.Options{PullSecrets: pullSecrets(m), NoBackupTarget: !hasTarget})
+			if err != nil {
+				return err
+			}
 			rev, err := d.Apply(ctx, app.Name, objs)
 			if err != nil {
 				return err
 			}
-			for _, v := range app.Volumes {
-				if v.Backup != nil {
-					if err := d.EnsureBackupSecret(ctx, app.Name); err != nil {
-						return err
-					}
-					break
+			if len(backedUp) > 0 && hasTarget {
+				if err := d.EnsureBackupSecret(ctx, app.Name); err != nil {
+					return err
 				}
 			}
 			cmd.Printf("App %s deployed (revision %d, %d services)\n", app.Name, rev, len(app.Services))
@@ -140,6 +149,11 @@ func newUpCmd() *cobra.Command {
 						cmd.Printf("  %s: %s://%s\n", name, scheme, host)
 					}
 				}
+			}
+			if !hasTarget {
+				// the app runs; only its backups wait (issue #28)
+				fmt.Fprintf(cmd.ErrOrStderr(), "warning: backups for %s are suspended: this server has no backup target.\n"+
+					"  Run 'jekyo backup config', then 'jekyo up' again to schedule them.\n", strings.Join(backedUp, ", "))
 			}
 			cmd.Println("Watch progress with: jekyo ps", app.Name)
 			return nil
@@ -293,6 +307,15 @@ func newRenderCmd() *cobra.Command {
 func sortedServiceNames(app *dsl.App) []string {
 	var names []string
 	for n := range app.Services {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	return names
+}
+
+func sortedVolumeNames(app *dsl.App) []string {
+	var names []string
+	for n := range app.Volumes {
 		names = append(names, n)
 	}
 	sort.Strings(names)

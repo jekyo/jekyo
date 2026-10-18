@@ -49,7 +49,15 @@ type Options struct {
 	// PullSecrets for external private registries (from `jekyo registry
 	// login`); only hosts actually referenced by images are included.
 	PullSecrets []PullSecret
+	// NoBackupTarget renders backup CronJobs suspended: the cluster has no
+	// target yet (jekyo backup config), so every run would fail on the
+	// missing secret (issue #28).
+	NoBackupTarget bool
 }
+
+// BackupSuspendedAnnotation marks a backup CronJob suspended for lack of a
+// target, so status can say why rather than show a silent schedule.
+const BackupSuspendedAnnotation = "jekyo.io/backup-suspended"
 
 const pullSecretName = "jekyo-registry-pull"
 
@@ -84,7 +92,7 @@ func Compile(app *dsl.App, opts Options) ([]runtime.Object, error) {
 
 	for _, volName := range sortedKeys(app.Volumes) {
 		if app.Volumes[volName].Backup != nil {
-			objs = append(objs, backupCronJob(app, volName, shared[volName]))
+			objs = append(objs, backupCronJob(app, volName, shared[volName], opts.NoBackupTarget))
 		}
 	}
 
@@ -311,7 +319,7 @@ func ClaimNameFor(app *dsl.App, volName string, isShared bool) string {
 // backupCronJob renders the scheduled restic backup for one volume. The
 // jekyo-backup secret provides the S3 target and restic password; the
 // repository path is namespaced per app/volume.
-func backupCronJob(app *dsl.App, volName string, isShared bool) *batchv1.CronJob {
+func backupCronJob(app *dsl.App, volName string, isShared, noTarget bool) *batchv1.CronJob {
 	b := app.Volumes[volName].Backup
 	script := fmt.Sprintf(
 		"restic snapshots >/dev/null 2>&1 || restic init; "+
@@ -322,7 +330,7 @@ func backupCronJob(app *dsl.App, volName string, isShared bool) *batchv1.CronJob
 	l := labels(app, "")
 	l["jekyo.io/volume"] = volName
 	l["jekyo.io/backup"] = "true"
-	return &batchv1.CronJob{
+	cj := &batchv1.CronJob{
 		TypeMeta:   metav1.TypeMeta{APIVersion: "batch/v1", Kind: "CronJob"},
 		ObjectMeta: metav1.ObjectMeta{Name: "backup-" + volName, Namespace: NamespaceFor(app.Name), Labels: l},
 		Spec: batchv1.CronJobSpec{
@@ -341,6 +349,12 @@ func backupCronJob(app *dsl.App, volName string, isShared bool) *batchv1.CronJob
 			},
 		},
 	}
+	if noTarget {
+		suspend := true
+		cj.Spec.Suspend = &suspend
+		cj.Annotations = map[string]string{BackupSuspendedAnnotation: "no backup target: run 'jekyo backup config', then 'jekyo up'"}
+	}
+	return cj
 }
 
 // LocalBackupHostPath is where local backup repositories live on the

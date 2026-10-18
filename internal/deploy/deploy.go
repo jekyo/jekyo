@@ -277,6 +277,16 @@ func toUnstructured(obj runtime.Object) (*unstructured.Unstructured, error) {
 	return u, nil
 }
 
+// HasBackupTarget reports whether `jekyo backup config` has stored the
+// cluster backup target.
+func (d *Deployer) HasBackupTarget(ctx context.Context) (bool, error) {
+	_, err := d.Client.Typed.CoreV1().Secrets("kube-system").Get(ctx, compile.BackupSecretName, metav1.GetOptions{})
+	if errors.IsNotFound(err) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
 // EnsureBackupSecret copies the cluster backup target (kube-system) into
 // the app's namespace so backup pods can reference it.
 func (d *Deployer) EnsureBackupSecret(ctx context.Context, appName string) error {

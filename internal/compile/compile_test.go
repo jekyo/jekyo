@@ -438,3 +438,39 @@ services:
 		t.Fatalf("cert requests: %v", certs)
 	}
 }
+
+// Without a cluster backup target the CronJob would fail every run on its
+// missing secret, so it is rendered suspended and the deploy succeeds
+// (issue #28).
+func TestCompileBackupWithoutTarget(t *testing.T) {
+	y := `
+app: a
+services:
+  db:
+    image: postgres:16
+    volumes:
+      data: /var/lib/postgresql/data
+volumes:
+  data:
+    size: 5Gi
+    backup:
+      schedule: "0 3 * * *"
+`
+	for _, missing := range []bool{false, true} {
+		objs, err := Compile(mustParse(t, y), Options{NoBackupTarget: missing})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, o := range objs {
+			if cj, ok := o.(*batchv1.CronJob); ok {
+				suspended := cj.Spec.Suspend != nil && *cj.Spec.Suspend
+				if suspended != missing {
+					t.Fatalf("NoBackupTarget=%v: suspend=%v", missing, suspended)
+				}
+				if missing && cj.Annotations[BackupSuspendedAnnotation] == "" {
+					t.Fatalf("suspended cronjob should say why: %v", cj.Annotations)
+				}
+			}
+		}
+	}
+}
