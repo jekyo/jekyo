@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/goccy/go-yaml"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -218,6 +219,13 @@ func validate(app *App) error {
 			}
 			if isRedirect && svc.HTTP.WebSocket.Enabled {
 				bad("%s: http.websocket has no effect on a redirect service", p)
+			}
+			if t := svc.HTTP.Timeout; t != "" {
+				if isRedirect {
+					bad("%s: http.timeout has no effect on a redirect service", p)
+				} else if d, err := time.ParseDuration(t); t != "infinity" && (err != nil || d <= 0) {
+					bad("%s: http.timeout %q must be a positive duration (30s, 5m) or infinity", p, t)
+				}
 			}
 		}
 		for _, e := range svc.Expose {

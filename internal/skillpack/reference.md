@@ -45,6 +45,8 @@ services:               # required, at least one
       websocket: true         # opt the route into WebSocket upgrades (Contour
                               # 403s them otherwise); true = route path, or a
                               # list of paths e.g. ["/ws", "/viewer"]
+      timeout: 5m             # ingress response timeout (default 15s, then
+                              # 504); duration or infinity, every host
     expose:                   # raw TCP/UDP on the node
       - port: 5432
         node: 30432           # NodePort 30000-32767, OR:

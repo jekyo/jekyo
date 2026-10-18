@@ -141,6 +141,10 @@ type HTTP struct {
 	// paths are named in projectcontour.io/websocket-routes (issue #22).
 	// true enables it on the route's path; a list names specific paths.
 	WebSocket WebSocket `yaml:"websocket"`
+	// Timeout is the ingress's upstream response timeout ("30s", "5m",
+	// "infinity"). Contour's default of 15s answers longer requests with a
+	// 504 even when the service completes them (issue #25).
+	Timeout string `yaml:"timeout"`
 }
 
 // Hosts returns the hosts the route answers on, in declaration order.

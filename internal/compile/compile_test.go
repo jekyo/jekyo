@@ -474,3 +474,49 @@ volumes:
 		}
 	}
 }
+
+// http.timeout lifts Contour's 15s upstream response timeout, which cut
+// long requests with a 504 (issue #25); one Ingress serves every host.
+func TestCompileTimeout(t *testing.T) {
+	y := `
+app: a
+services:
+  api:
+    image: x
+    port: 80
+    http:
+      domains: [a.com, b.com]
+      timeout: 5m
+      websocket: true
+  forever:
+    image: x
+    port: 80
+    http:
+      domain: f.com
+      timeout: infinity
+  plain:
+    image: x
+    port: 80
+    http:
+      domain: p.com
+`
+	objs, err := Compile(mustParse(t, y), Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]map[string]string{}
+	for _, o := range objs {
+		if ing, ok := o.(*networkingv1.Ingress); ok {
+			got[ing.Name] = ing.Annotations
+		}
+	}
+	if got["api"]["projectcontour.io/response-timeout"] != "5m" || got["api"]["projectcontour.io/websocket-routes"] != "/" {
+		t.Fatalf("api annotations: %v", got["api"])
+	}
+	if got["forever"]["projectcontour.io/response-timeout"] != "infinity" {
+		t.Fatalf("infinity: %v", got["forever"])
+	}
+	if _, set := got["plain"]["projectcontour.io/response-timeout"]; set {
+		t.Fatalf("no timeout keeps Contour's default: %v", got["plain"])
+	}
+}

@@ -182,6 +182,11 @@
                 { "type": "array", "items": { "type": "string" } }
               ],
               "description": "Opt the route into WebSocket upgrades (Contour rejects them with 403 otherwise). true enables it on the route path; a list of paths names specific routes."
+            },
+            "timeout": {
+              "type": "string",
+              "pattern": "^(infinity|([0-9]+(\\.[0-9]+)?(ns|us|ms|s|m|h))+)$",
+              "description": "Upstream response timeout at the ingress, e.g. 30s or 5m, or infinity. Without it Contour answers requests slower than 15s with a 504."
             }
           }
         },
