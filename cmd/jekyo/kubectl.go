@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -20,14 +21,15 @@ func newKubectlCmd() *cobra.Command {
 		Short:              "Run kubectl against the current context",
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if len(args) > 0 && args[0] == "--" {
-				args = args[1:]
+			ctxName, args := splitKubectlArgs(args)
+			if ctxName == "" {
+				ctxName = contextFlag
 			}
 			store, err := contexts.Open()
 			if err != nil {
 				return err
 			}
-			m, err := store.Resolve(contextFlag)
+			m, err := store.Resolve(ctxName)
 			if err != nil {
 				return err
 			}
@@ -53,4 +55,33 @@ func newKubectlCmd() *cobra.Command {
 			return nil
 		},
 	}
+}
+
+// splitKubectlArgs takes jekyo's global flags (--context, --ssh-key) out
+// of the arguments kubectl would otherwise receive: flag parsing is off
+// for this command, so `jekyo --context gpu kubectl get pods` arrives as
+// [--context gpu get pods] (issue #27). Everything after the first "--"
+// belongs to kubectl untouched.
+func splitKubectlArgs(args []string) (context string, rest []string) {
+	rest = []string{}
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch {
+		case a == "--":
+			return context, append(rest, args[i+1:]...)
+		case a == "--context" || a == "--ssh-key":
+			if i+1 < len(args) {
+				if a == "--context" {
+					context = args[i+1]
+				}
+				i++
+			}
+		case strings.HasPrefix(a, "--context="):
+			context = strings.TrimPrefix(a, "--context=")
+		case strings.HasPrefix(a, "--ssh-key="):
+		default:
+			rest = append(rest, a)
+		}
+	}
+	return context, rest
 }
