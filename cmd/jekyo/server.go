@@ -218,6 +218,7 @@ func newServerInstallCmd() *cobra.Command {
 	cmd.Flags().StringVar(&cfg.AcmeEmail, "acme-email", "", "Let's Encrypt account email (required with --domain)")
 	cmd.Flags().StringVar(&name, "name", "", "context name (default: derived from --ip)")
 	cmd.Flags().StringVar(&cfg.K3sVersion, "k3s-version", "", "k3s version (default "+provision.DefaultK3sVersion+")")
+	cmd.Flags().IntVar(&cfg.PidsLimit, "pids-limit", 0, "max processes per pod, cluster-wide (default: kubelet's); pass it again on every re-install")
 	cmd.Flags().BoolVar(&cfg.NoVPN, "no-vpn", false, "skip the WireGuard VPN addon")
 	cmd.Flags().BoolVar(&cfg.NoGPU, "no-gpu", false, "skip NVIDIA setup even if a GPU is present")
 	cmd.Flags().BoolVar(&cfg.Fix, "fix", false, "auto-remediate fixable preflight warnings")

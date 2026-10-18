@@ -136,21 +136,9 @@ func (in *Installer) Install(f Facts, creds Credentials) error {
 	// Always run the installer script — it is idempotent and re-running is
 	// the only way flag changes converge on an existing install.
 	if err := in.step(fmt.Sprintf("%s k3s %s", verb, version), func() error {
-		flags := []string{
-			"--disable=traefik",
-			"--disable=servicelb", // envoy's DaemonSet binds hostPorts 80/443 itself
-			"--advertise-address " + cfg.IP,
-			"--node-external-ip " + cfg.IP,
-			"--default-local-storage-path " + cfg.StoragePath,
-			"--kubelet-arg=allowed-unsafe-sysctls=net.*",
-			"--write-kubeconfig-mode 640",
-		}
-		if cfg.InternalDomain != "" && cfg.InternalDomain != "cluster.local" {
-			flags = append(flags, "--cluster-domain "+cfg.InternalDomain)
-		}
 		cmd := fmt.Sprintf(
 			"curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION=%q sh -s - server %s",
-			version, strings.Join(flags, " "))
+			version, strings.Join(k3sServerFlags(cfg), " "))
 		_, err := in.SSH.Run(cmd)
 		return err
 	}); err != nil {
@@ -322,4 +310,25 @@ func (in *Installer) Uninstall(purgeStorage bool) error {
 
 func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// k3sServerFlags are the k3s server arguments for cfg. The installer
+// script rewrites the service with exactly these on every converge.
+func k3sServerFlags(cfg Config) []string {
+	flags := []string{
+		"--disable=traefik",
+		"--disable=servicelb", // envoy's DaemonSet binds hostPorts 80/443 itself
+		"--advertise-address " + cfg.IP,
+		"--node-external-ip " + cfg.IP,
+		"--default-local-storage-path " + cfg.StoragePath,
+		"--kubelet-arg=allowed-unsafe-sysctls=net.*",
+		"--write-kubeconfig-mode 640",
+	}
+	if cfg.InternalDomain != "" && cfg.InternalDomain != "cluster.local" {
+		flags = append(flags, "--cluster-domain "+cfg.InternalDomain)
+	}
+	if cfg.PidsLimit > 0 {
+		flags = append(flags, fmt.Sprintf("--kubelet-arg=pod-max-pids=%d", cfg.PidsLimit))
+	}
+	return flags
 }

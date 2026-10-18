@@ -36,6 +36,10 @@ type Config struct {
 	Fix            bool
 	RemoveDocker   bool
 	K3sVersion     string
+	// PidsLimit is the kubelet's per-pod PID ceiling (pod-max-pids); 0
+	// keeps the kubelet default. Kubernetes has no per-container limit,
+	// so this is cluster-wide (issue #4).
+	PidsLimit int
 }
 
 // k3s-owned processes that legitimately hold our ports on an existing install.
@@ -207,6 +211,15 @@ func Preflight(f Facts, cfg Config) []CheckResult {
 	if !cfg.NoVPN && f.WGQuickAppArmor {
 		addFix("apparmor: wg-quick", Warn, "Ubuntu's wg-quick profile also confines the VPN container's wg-quick and it crash-loops (fix disables only that profile)",
 			"ln -sf /etc/apparmor.d/wg-quick /etc/apparmor.d/disable/wg-quick && apparmor_parser -R /etc/apparmor.d/wg-quick")
+	}
+	if cfg.PidsLimit != 0 {
+		// below this a pod's pause container, a shell and a probe can
+		// already exhaust it, and failures look nothing like a limit
+		if cfg.PidsLimit < 64 {
+			add("pids limit", Fail, fmt.Sprintf("--pids-limit %d is too low to run a pod; use 64 or more", cfg.PidsLimit))
+		} else {
+			add("pids limit", Pass, fmt.Sprintf("%d processes per pod", cfg.PidsLimit))
+		}
 	}
 	if f.SwapActive {
 		add("swap", Warn, "enabled — k3s tolerates it, memory limits get fuzzy")

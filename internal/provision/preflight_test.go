@@ -246,3 +246,27 @@ func TestSudoError(t *testing.T) {
 		t.Fatalf("non-sudo errors pass through, got %v", got)
 	}
 }
+
+// --pids-limit becomes the kubelet's per-pod PID ceiling (issue #4);
+// without it the kubelet default stands.
+func TestK3sServerFlags(t *testing.T) {
+	base := Config{IP: "203.0.113.7", StoragePath: "/storage"}
+	if got := strings.Join(k3sServerFlags(base), " "); strings.Contains(got, "pod-max-pids") ||
+		!strings.Contains(got, "--advertise-address 203.0.113.7") || !strings.Contains(got, "--default-local-storage-path /storage") {
+		t.Fatalf("defaults: %s", got)
+	}
+	base.PidsLimit = 4096
+	if got := strings.Join(k3sServerFlags(base), " "); !strings.Contains(got, "--kubelet-arg=pod-max-pids=4096") {
+		t.Fatalf("pids limit: %s", got)
+	}
+}
+
+func TestPreflightPidsLimit(t *testing.T) {
+	f := ParseFacts(sampleFactsOutput)
+	if r := findCheck(t, Preflight(f, Config{StoragePath: "/s", PidsLimit: 8}), "pids limit"); r.Status != Fail {
+		t.Fatalf("a ceiling too low to boot a container must fail: %+v", r)
+	}
+	if r := findCheck(t, Preflight(f, Config{StoragePath: "/s", PidsLimit: 4096}), "pids limit"); r.Status != Pass {
+		t.Fatalf("4096: %+v", r)
+	}
+}
