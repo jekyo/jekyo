@@ -6,6 +6,29 @@ All notable changes to JEKYO are documented here. The format follows
 may contain breaking changes and patches never do. From 1.0 on, breaking
 changes only land in major versions.
 
+## [0.25.0] - 2026-10-18
+
+### Added
+
+- `http.timeout` sets the ingress response timeout (`30s`, `5m`,
+  `infinity`). Contour answers requests slower than 15s with a 504 even
+  when the service completes them; the timeout applies to every host
+  under `domains:` (#25).
+- Deploying a domain another app on the server already serves, or one
+  the server routes itself such as `registry.<domain>`, is refused before
+  anything is applied, naming the owner (#24).
+- `jekyo server install --pids-limit N` caps processes per pod through
+  the kubelet's `pod-max-pids`. Kubernetes has no per-container limit,
+  so the ceiling is cluster-wide (#4).
+
+### Fixed
+
+- `jekyo --context <name> kubectl ...` runs against that context; the
+  flag used to be handed to kubectl, which has no such context (#27).
+- `jekyo up` exits 0 when a volume has `backup:` but the server has no
+  backup target yet. The backup CronJob is created suspended, the
+  deploy warns, and `jekyo status` shows why (#28).
+
 ## [0.24.1] - 2026-10-17
 
 ### Added
