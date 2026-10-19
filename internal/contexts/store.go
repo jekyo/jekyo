@@ -213,6 +213,39 @@ func (s *Store) Resolve(flagValue string) (Meta, error) {
 // MarshalJSON keeps time formatting stable for -o json output.
 func (m Meta) JSON() ([]byte, error) { return json.MarshalIndent(m, "", "  ") }
 
+const masked = "********"
+
+// Redacted is a copy of m with every password masked, for display: agents
+// run context show first and its output lands in their transcripts
+// (issue #29). An unset password stays empty so it does not look set.
+func (m Meta) Redacted() Meta {
+	mask := func(s string) string {
+		if s == "" {
+			return ""
+		}
+		return masked
+	}
+	if m.Registry != nil {
+		r := *m.Registry
+		r.Password = mask(r.Password)
+		m.Registry = &r
+	}
+	if m.VPN != nil {
+		v := *m.VPN
+		v.Password = mask(v.Password)
+		m.VPN = &v
+	}
+	if m.Logins != nil {
+		logins := make(map[string]Login, len(m.Logins))
+		for host, l := range m.Logins {
+			l.Password = mask(l.Password)
+			logins[host] = l
+		}
+		m.Logins = logins
+	}
+	return m
+}
+
 type exportBlob struct {
 	Meta       Meta   `json:"meta"`
 	Kubeconfig []byte `json:"kubeconfig"`

@@ -40,7 +40,7 @@ func (c *Client) Login(password string) error {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
-		return fmt.Errorf("vpn login failed (status %d) — check the password in 'jekyo context show'", resp.StatusCode)
+		return fmt.Errorf("vpn login failed (status %d) — check the password in 'jekyo context show --show-secrets'", resp.StatusCode)
 	}
 	return nil
 }

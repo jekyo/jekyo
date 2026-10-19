@@ -55,7 +55,7 @@ func (c *Client) HasTag(repo, tag string) (bool, error) {
 	case http.StatusNotFound:
 		return false, nil
 	case http.StatusUnauthorized:
-		return false, fmt.Errorf("registry auth failed (check 'jekyo context show' credentials)")
+		return false, fmt.Errorf("registry auth failed (check the credentials in 'jekyo context show --show-secrets')")
 	default:
 		return false, fmt.Errorf("registry: unexpected status %d for %s:%s", resp.StatusCode, repo, tag)
 	}

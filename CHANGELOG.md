@@ -6,6 +6,16 @@ All notable changes to JEKYO are documented here. The format follows
 may contain breaking changes and patches never do. From 1.0 on, breaking
 changes only land in major versions.
 
+## [0.25.1] - 2026-10-19
+
+### Changed
+
+- `jekyo context show` masks the registry, VPN and registry-login
+  passwords (`"********"`); `--show-secrets` prints them. Agents run
+  `context show` first, so the passwords used to land in transcripts
+  and scrollback unasked. `context export` still carries the real
+  values (#29).
+
 ## [0.25.0] - 2026-10-18
 
 ### Added

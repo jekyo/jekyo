@@ -169,9 +169,10 @@ func newContextRmCmd() *cobra.Command {
 }
 
 func newContextShowCmd() *cobra.Command {
-	return &cobra.Command{
+	var showSecrets bool
+	cmd := &cobra.Command{
 		Use:   "show [name]",
-		Short: "Show a context's details",
+		Short: "Show a context's details (passwords masked; --show-secrets reveals them)",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			store, err := contexts.Open()
@@ -186,6 +187,9 @@ func newContextShowCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if !showSecrets {
+				m = m.Redacted()
+			}
 			out, err := m.JSON()
 			if err != nil {
 				return err
@@ -194,6 +198,9 @@ func newContextShowCmd() *cobra.Command {
 			return nil
 		},
 	}
+	// a flag, not a prompt: agents cannot answer prompts
+	cmd.Flags().BoolVar(&showSecrets, "show-secrets", false, "print registry, VPN and login passwords in plain text")
+	return cmd
 }
 
 func orDash(s string) string {

@@ -104,3 +104,35 @@ func TestCurrentAndResolve(t *testing.T) {
 		t.Fatalf("expected cleared current, got %q", cur)
 	}
 }
+
+// context show is what agents run first; secrets must not reach their
+// transcripts unless asked for (issue #29).
+func TestRedacted(t *testing.T) {
+	m := Meta{Name: "s",
+		Registry: &Registry{Host: "registry.x", Username: "u", Password: "reg-secret"},
+		VPN:      &VPN{AdminURL: "https://vpn.x", Password: "vpn-secret"},
+		Logins:   map[string]Login{"ghcr.io": {Username: "me", Password: "ghcr-secret"}},
+	}
+	out, err := m.Redacted().JSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(out)
+	for _, secret := range []string{"reg-secret", "vpn-secret", "ghcr-secret"} {
+		if strings.Contains(s, secret) {
+			t.Fatalf("%s leaked: %s", secret, s)
+		}
+	}
+	if !strings.Contains(s, `"password": "********"`) || !strings.Contains(s, "registry.x") || !strings.Contains(s, `"username": "me"`) {
+		t.Fatalf("non-secret fields must stay: %s", s)
+	}
+	// the stored context keeps its real values
+	if m.Registry.Password != "reg-secret" || m.VPN.Password != "vpn-secret" || m.Logins["ghcr.io"].Password != "ghcr-secret" {
+		t.Fatalf("Redacted mutated the original: %+v", m)
+	}
+	// an unset password stays empty rather than looking set
+	empty := Meta{VPN: &VPN{AdminURL: "https://vpn.x"}}
+	if empty.Redacted().VPN.Password != "" {
+		t.Fatal("unset password should stay empty")
+	}
+}

@@ -203,10 +203,10 @@ func newServerInstallCmd() *cobra.Command {
 			cmd.Println("\nCluster ready. Context:", name, "(now current)")
 			cmd.Println("  kubectl:  jekyo kubectl -- get pods -A")
 			if meta.Registry.Host != "" {
-				cmd.Printf("  registry: https://%s (user %s, password in 'jekyo context show')\n", meta.Registry.Host, creds.RegistryUser)
+				cmd.Printf("  registry: https://%s (user %s, password: 'jekyo context show --show-secrets')\n", meta.Registry.Host, creds.RegistryUser)
 			}
 			if meta.VPN != nil {
-				cmd.Printf("  vpn:      admin UI %s (password in 'jekyo context show')\n", orDash(meta.VPN.AdminURL))
+				cmd.Printf("  vpn:      admin UI %s (password: 'jekyo context show --show-secrets')\n", orDash(meta.VPN.AdminURL))
 			}
 			return nil
 		},
