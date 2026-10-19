@@ -6,6 +6,18 @@ All notable changes to JEKYO are documented here. The format follows
 may contain breaking changes and patches never do. From 1.0 on, breaking
 changes only land in major versions.
 
+## [0.25.2] - 2026-10-19
+
+### Changed
+
+- The agent skill pack (`jekyo skill show`, `jekyo skill install`) covers
+  the CLI as it is now: `--context` on every command (preferred over
+  `context use`), `server preflight` and `server install` with `--fix`
+  and `--pids-limit`, `jekyo kubectl`, `context show --show-secrets`,
+  and the 0.25 deploy behavior (suspended backups without a target,
+  refused cross-app domains, `http.timeout`). Re-run `jekyo skill
+  install` after updating to refresh installed packs.
+
 ## [0.25.1] - 2026-10-19
 
 ### Changed
