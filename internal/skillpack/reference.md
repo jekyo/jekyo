@@ -137,6 +137,14 @@ inputs:                 # TEMPLATES ONLY; resolved and stripped by jekyo init
   server at /var/lib/jekyo/backups (mount a dedicated disk there). Then
   `jekyo backup now|ls|restore <app>/<volume>`. Restore stops the app,
   replaces the volume, and restarts it.
+- A volume with `backup:` on a server without a backup target still
+  deploys: its backup CronJob is created suspended and `jekyo up` warns.
+  Run `jekyo backup config`, then `jekyo up` again to schedule it.
+- A domain already served by another app on the server (or by the server
+  itself, e.g. `registry.<domain>`) is refused before anything is applied;
+  the error names the owner.
+- `http:` requests slower than 15s get a 504 from the ingress unless the
+  service sets `http.timeout`.
 - External private registry images need `jekyo registry login <host>` once
   per context; pull secrets are wired automatically.
 
@@ -176,6 +184,10 @@ restore tools (pg_dump, mysqldump, redis SAVE) over raw file copies.
 
 ## CLI you should use
 
+Every command takes `--context <name>` to target another server without
+changing the default (`context use` switches it for every shell on the
+machine; prefer `--context`).
+
 ```
 jekyo render [-f file]         # ALWAYS check generated Kubernetes YAML before deploying
 jekyo up [-f file] [--env-file .env]
@@ -195,8 +207,14 @@ jekyo backup config|now|ls|restore
 jekyo registry login <host>
 jekyo images | build [-f file]
 jekyo vpn peers | add-peer | rm-peer | config
-jekyo server harden            # fail2ban + automatic security updates on the server
-jekyo context ls | use | show | export | import
+jekyo server preflight <user@host> [--storage /storage]   # read-only checks
+jekyo server install <user@host> --ip <ip> [--storage /storage] [--domain d --acme-email e]
+                 [--fix] [--pids-limit N] [--no-gpu] [--no-vpn] [--remove-docker]
+                               # idempotent; re-run with the SAME flags to converge
+jekyo server info | harden     # health; fail2ban + automatic security updates
+jekyo context ls | use | show [--show-secrets] | export | import
+                               # show masks passwords; only pass --show-secrets when a password is needed
+jekyo kubectl [-- args]        # escape hatch for inspection; honors --context
 jekyo schema                   # JSON Schema for validation
 jekyo update                   # self-update the CLI to the latest release
 ```
