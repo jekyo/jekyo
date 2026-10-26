@@ -146,7 +146,11 @@ inputs:                 # TEMPLATES ONLY; resolved and stripped by jekyo init
 - `http:` requests slower than 15s get a 504 from the ingress unless the
   service sets `http.timeout`.
 - External private registry images need `jekyo registry login <host>` once
-  per context; pull secrets are wired automatically.
+  per server; pull secrets are wired automatically. The login is stored
+  on the server too, so other machines pick it up on their next `jekyo up`.
+- On a second machine, `jekyo context add <user@host>` builds a complete
+  context (kubeconfig, registry, VPN admin password, registry logins) from
+  the server itself; no export/import needed.
 
 ## Migrating from docker-compose
 
@@ -212,6 +216,7 @@ jekyo server install <user@host> --ip <ip> [--storage /storage] [--domain d --ac
                  [--fix] [--pids-limit N] [--no-gpu] [--no-vpn] [--remove-docker]
                                # idempotent; re-run with the SAME flags to converge
 jekyo server info | harden     # health; fail2ban + automatic security updates
+jekyo context add <user@host> [--name n]   # adopt a server installed elsewhere
 jekyo context ls | use | show [--show-secrets] | export | import
                                # show masks passwords; only pass --show-secrets when a password is needed
 jekyo kubectl [-- args]        # escape hatch for inspection; honors --context

@@ -6,6 +6,25 @@ All notable changes to JEKYO are documented here. The format follows
 may contain breaking changes and patches never do. From 1.0 on, breaking
 changes only land in major versions.
 
+## [Unreleased]
+
+### Fixed
+
+- `jekyo context add` on a new machine now yields a working VPN: every
+  `jekyo vpn` command used to fail with "vpn login failed (status 401)"
+  because wg-easy only keeps a hash of the admin password. The server
+  now stores the VPN admin password and `jekyo registry login`
+  credentials in the `kube-system/jekyo-credentials` Secret, and
+  `context add` reads them. Servers installed earlier get the Secret the
+  first time the installing machine runs any `jekyo vpn` command,
+  `jekyo up` or `jekyo registry login` with this version.
+- `jekyo registry login` credentials reach other machines: `jekyo up`
+  merges the server's logins into the local context, so images from
+  private registries keep their pull secret no matter who deploys.
+- `jekyo server install` no longer rotates the registry and VPN
+  passwords when re-run from a machine without the context (it reuses
+  the server's), and keeps the context's registry logins on re-install.
+
 ## [0.25.2] - 2026-10-19
 
 ### Changed

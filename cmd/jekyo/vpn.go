@@ -23,6 +23,12 @@ func vpnClient(m contexts.Meta, store *contexts.Store) (*vpn.Client, func(), err
 	if m.VPN == nil {
 		return nil, nil, fmt.Errorf("context %q has no VPN (installed with --no-vpn?)", m.Name)
 	}
+	// best effort: picks up a password stored by another machine, or
+	// stores ours for the next 'jekyo context add'; login reports failures
+	_ = syncCreds(store, &m)
+	if m.VPN.Password == "" {
+		return nil, nil, fmt.Errorf("context %q has no VPN admin password: run any 'jekyo vpn' command once on the machine that installed the server (it stores the password there), then 'jekyo context rm %s' and 'jekyo context add' here again", m.Name, m.Name)
+	}
 	cleanup := func() {}
 	var transport http.RoundTripper
 	base := m.VPN.AdminURL

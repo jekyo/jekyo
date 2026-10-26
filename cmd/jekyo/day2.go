@@ -792,12 +792,19 @@ func newRegistryCmd() *cobra.Command {
 					pass = strings.TrimSpace(p)
 				}
 			}
+			// pull first so another machine's logins are not overwritten
+			if err := syncCreds(store, &m); err != nil {
+				cmd.PrintErrf("warning: syncing credentials with the server: %v\n", err)
+			}
 			if m.Logins == nil {
 				m.Logins = map[string]contexts.Login{}
 			}
 			m.Logins[args[0]] = contexts.Login{Username: user, Password: pass}
 			if err := store.Save(m); err != nil {
 				return err
+			}
+			if err := pushCreds(store, m); err != nil {
+				cmd.PrintErrf("warning: storing the login on the server: %v (other machines will not see it)\n", err)
 			}
 			cmd.Printf("Stored login for %s in context %s. Apps using %s/... images get pull access on next 'jekyo up'.\n", args[0], m.Name, args[0])
 			return nil
@@ -819,12 +826,18 @@ func newRegistryCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if err := syncCreds(store, &m); err != nil {
+				cmd.PrintErrf("warning: syncing credentials with the server: %v\n", err)
+			}
 			if _, ok := m.Logins[args[0]]; !ok {
 				return fmt.Errorf("no login stored for %s", args[0])
 			}
 			delete(m.Logins, args[0])
 			if err := store.Save(m); err != nil {
 				return err
+			}
+			if err := pushCreds(store, m); err != nil {
+				cmd.PrintErrf("warning: removing the login on the server: %v (other machines will restore it)\n", err)
 			}
 			cmd.Println("Removed login for", args[0])
 			return nil

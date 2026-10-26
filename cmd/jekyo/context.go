@@ -283,12 +283,11 @@ func newContextAddCmd() *cobra.Command {
 			out, err := ssh.Run(
 				"uname -m; " +
 					"k3s kubectl get ingress -n kube-system registry -o jsonpath='{.spec.rules[0].host}' 2>/dev/null; echo; " +
-					"test -f /var/lib/rancher/k3s/server/manifests/jekyo-vpn.yaml && echo vpn=yes || echo vpn=no; " +
-					"grep -A2 'auth:' /etc/rancher/k3s/registries.yaml | grep -E 'username|password' | head -2")
+					"test -f /var/lib/rancher/k3s/server/manifests/jekyo-vpn.yaml && echo vpn=yes || echo vpn=no")
 			if err != nil {
 				return fmt.Errorf("inspecting the server: %w", err)
 			}
-			var arch, regHost, regUser, regPass string
+			var arch, regHost string
 			vpnPresent := false
 			for _, line := range strings.Split(out, "\n") {
 				line = strings.TrimSpace(line)
@@ -299,12 +298,9 @@ func newContextAddCmd() *cobra.Command {
 					regHost = line
 				case line == "vpn=yes":
 					vpnPresent = true
-				case strings.HasPrefix(line, "username:"):
-					regUser = strings.Trim(strings.TrimSpace(strings.TrimPrefix(line, "username:")), `"`)
-				case strings.HasPrefix(line, "password:"):
-					regPass = strings.Trim(strings.TrimSpace(strings.TrimPrefix(line, "password:")), `"`)
 				}
 			}
+			sc := readServerCreds(ssh)
 			if ip == "" {
 				return fmt.Errorf("could not determine the server's public IP from its k3s unit (read %d bytes, head: %.120s); is this a JEKYO install?", len(unit), unit)
 			}
@@ -337,11 +333,11 @@ func newContextAddCmd() *cobra.Command {
 				Name: name, SSH: target, IP: ip, Domain: domain,
 				Storage: storage, Arch: arch, CreatedAt: time.Now(),
 			}
-			if regUser != "" {
-				meta.Registry = &contexts.Registry{Host: regHost, Username: regUser, Password: regPass}
+			if sc.RegistryUser != "" {
+				meta.Registry = &contexts.Registry{Host: regHost, Username: sc.RegistryUser, Password: sc.RegistryPassword}
 			}
 			if vpnPresent {
-				meta.VPN = &contexts.VPN{}
+				meta.VPN = &contexts.VPN{Password: sc.VPNPassword}
 				if domain != "" {
 					meta.VPN.AdminURL = "https://vpn." + domain
 				}
@@ -355,17 +351,55 @@ func newContextAddCmd() *cobra.Command {
 			if err := store.SetCurrent(name); err != nil {
 				return err
 			}
+			// registry logins (and the VPN password, if the SSH read missed
+			// it) come from the server's credentials Secret
+			if err := syncCreds(store, &meta); err != nil {
+				cmd.PrintErrf("warning: reading credentials from the server: %v\n", err)
+			}
 			cmd.Printf("Context %q added (now current): %s", name, ip)
 			if domain != "" {
 				cmd.Printf(" · %s", domain)
 			}
 			cmd.Println()
-			if vpnPresent {
-				cmd.Println("Note: the VPN admin password cannot be recovered from the server; it stays on the machine that installed it (jekyo context export there, import here, if you need it).")
+			if meta.VPN != nil && meta.VPN.Password == "" {
+				cmd.Println("Note: this server predates stored credentials, so the VPN admin password is only on the machine that installed it. Run any 'jekyo vpn' command there once (it stores the password on the server), then 'jekyo context rm' and 'context add' here again.")
 			}
 			return nil
 		},
 	}
 	cmd.Flags().StringVar(&name, "name", "", "context name (default: derived from the domain or IP)")
 	return cmd
+}
+
+// serverCreds are the secrets a server can hand back over SSH.
+type serverCreds struct {
+	RegistryUser, RegistryPassword, VPNPassword string
+}
+
+// readServerCreds recovers the registry login from registries.yaml (k3s
+// needs it in plain text) and the VPN admin password from the credentials
+// Secret. Missing pieces stay empty: a fresh server has neither.
+func readServerCreds(ssh interface{ Run(string) (string, error) }) serverCreds {
+	out, _ := ssh.Run("grep -A2 'auth:' /etc/rancher/k3s/registries.yaml 2>/dev/null | grep -E 'username|password' | head -2; " +
+		"echo vpn-password: $(k3s kubectl -n " + credsNamespace + " get secret " + credsSecret + " -o jsonpath='{.data." + credsVPNKey + "}' 2>/dev/null | base64 -d 2>/dev/null)")
+	return parseServerCreds(out)
+}
+
+func parseServerCreds(out string) serverCreds {
+	var sc serverCreds
+	value := func(line, key string) string {
+		return strings.Trim(strings.TrimSpace(strings.TrimPrefix(line, key)), `"`)
+	}
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
+		switch {
+		case strings.HasPrefix(line, "username:"):
+			sc.RegistryUser = value(line, "username:")
+		case strings.HasPrefix(line, "password:"):
+			sc.RegistryPassword = value(line, "password:")
+		case strings.HasPrefix(line, "vpn-password:"):
+			sc.VPNPassword = value(line, "vpn-password:")
+		}
+	}
+	return sc
 }

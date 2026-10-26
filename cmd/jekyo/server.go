@@ -143,6 +143,7 @@ func newServerInstallCmd() *cobra.Command {
 
 			// Reuse credentials on converge so re-installs don't rotate secrets.
 			creds := provision.Credentials{RegistryUser: "jekyo"}
+			var prevLogins map[string]contexts.Login
 			if prev, err := store.Get(name); err == nil {
 				if prev.Registry != nil {
 					creds.RegistryUser = prev.Registry.Username
@@ -151,6 +152,16 @@ func newServerInstallCmd() *cobra.Command {
 				if prev.VPN != nil {
 					creds.VPNPassword = prev.VPN.Password
 				}
+				prevLogins = prev.Logins
+			}
+			// the server's own copy wins: converging from another machine
+			// (or a stale context) must not rotate secrets others still use
+			sc := readServerCreds(ssh)
+			if sc.RegistryPassword != "" {
+				creds.RegistryUser, creds.RegistryPassword = sc.RegistryUser, sc.RegistryPassword
+			}
+			if sc.VPNPassword != "" {
+				creds.VPNPassword = sc.VPNPassword
 			}
 			if creds.RegistryPassword == "" {
 				if creds.RegistryPassword, err = provision.NewPassword(); err != nil {
@@ -180,6 +191,7 @@ func newServerInstallCmd() *cobra.Command {
 				Arch:      facts.Arch,
 				CreatedAt: time.Now(),
 				Registry:  &contexts.Registry{Username: creds.RegistryUser, Password: creds.RegistryPassword},
+				Logins:    prevLogins,
 			}
 			if cfg.Domain != "" {
 				meta.Registry.Host = "registry." + cfg.Domain
@@ -198,6 +210,9 @@ func newServerInstallCmd() *cobra.Command {
 			}
 			if err := store.SetCurrent(name); err != nil {
 				return err
+			}
+			if err := syncCreds(store, &meta); err != nil {
+				cmd.PrintErrf("warning: storing credentials on the server: %v ('jekyo context add' elsewhere will lack the VPN password)\n", err)
 			}
 
 			cmd.Println("\nCluster ready. Context:", name, "(now current)")

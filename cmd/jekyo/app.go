@@ -103,6 +103,10 @@ func newUpCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			// registry logins added from another machine reach this one
+			if err := syncCreds(store, &m); err != nil {
+				cmd.PrintErrf("warning: syncing credentials with the server: %v\n", err)
+			}
 			if err := ensureBuilt(cmd, app, file, m); err != nil {
 				return err
 			}
