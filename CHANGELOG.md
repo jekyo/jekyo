@@ -6,7 +6,7 @@ All notable changes to JEKYO are documented here. The format follows
 may contain breaking changes and patches never do. From 1.0 on, breaking
 changes only land in major versions.
 
-## [Unreleased]
+## [0.25.3] - 2026-10-26
 
 ### Fixed
 
