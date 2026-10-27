@@ -148,7 +148,7 @@ type HTTP struct {
 	// ForceHTTPS answers plain-HTTP requests with a 301 to the https URL
 	// instead of serving them in the clear. Off by default: Contour applies
 	// require_tls to the whole virtual host, which also covers the HTTP-01
-	// challenge path kcert adds while issuing a certificate.
+	// challenge path kcert adds while issuing a certificate (issue #31).
 	ForceHTTPS bool `yaml:"force-https"`
 }
 
