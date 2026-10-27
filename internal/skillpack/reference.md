@@ -39,6 +39,10 @@ services:               # required, at least one
                               # each host, and each host gets its own cert
       path: /                 # default /
       tls: true               # default true; automatic certificate
+      force-https: true       # answer cleartext with a 301 to https instead
+                              # of serving it; needs tls. Off by default: the
+                              # redirect covers the whole host, including the
+                              # HTTP-01 path used to issue the certificate
       redirect: example.com   # domain-level redirect answered by the ingress;
                               # a redirect service defines NOTHING else (no
                               # image/build/port), it runs no container

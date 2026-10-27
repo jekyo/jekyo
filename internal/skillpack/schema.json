@@ -166,6 +166,11 @@
               "type": "boolean",
               "default": true
             },
+            "force-https": {
+              "type": "boolean",
+              "default": false,
+              "description": "Answer plain-HTTP requests with a 301 to the https URL instead of serving them in the clear. Requires tls. Off by default: the redirect is virtual-host wide, so it also covers the HTTP-01 challenge path used while issuing a certificate."
+            },
             "auth": {
               "type": "string",
               "enum": [

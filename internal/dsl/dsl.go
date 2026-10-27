@@ -145,6 +145,11 @@ type HTTP struct {
 	// "infinity"). Contour's default of 15s answers longer requests with a
 	// 504 even when the service completes them (issue #25).
 	Timeout string `yaml:"timeout"`
+	// ForceHTTPS answers plain-HTTP requests with a 301 to the https URL
+	// instead of serving them in the clear. Off by default: Contour applies
+	// require_tls to the whole virtual host, which also covers the HTTP-01
+	// challenge path kcert adds while issuing a certificate.
+	ForceHTTPS bool `yaml:"force-https"`
 }
 
 // Hosts returns the hosts the route answers on, in declaration order.

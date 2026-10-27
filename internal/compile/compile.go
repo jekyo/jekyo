@@ -848,6 +848,12 @@ func ingress(app *dsl.App, name string, svc dsl.Service) *networkingv1.Ingress {
 		}
 		meta.Annotations["projectcontour.io/websocket-routes"] = strings.Join(wsPaths, ",")
 	}
+	if h.ForceHTTPS && tls {
+		// Envoy's require_tls: answer cleartext with a 301 to https rather
+		// than serving it. Virtual-host scoped, so it covers every route on
+		// these hosts.
+		meta.Annotations["ingress.kubernetes.io/force-ssl-redirect"] = "true"
+	}
 	ing := &networkingv1.Ingress{
 		TypeMeta:   metav1.TypeMeta{APIVersion: "networking.k8s.io/v1", Kind: "Ingress"},
 		ObjectMeta: meta,

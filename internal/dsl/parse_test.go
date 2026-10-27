@@ -96,6 +96,8 @@ func TestParseErrors(t *testing.T) {
 		{"http without domain", "app: a\nservices:\n  s:\n    image: x\n    port: 80\n    http:\n      path: /\n", "http.domain"},
 		{"domain and domains", "app: a\nservices:\n  s:\n    image: x\n    port: 80\n    http:\n      domain: a.com\n      domains: [b.com]\n", "mutually exclusive"},
 		{"empty domains", "app: a\nservices:\n  s:\n    image: x\n    port: 80\n    http:\n      domains: []\n", "http.domain"},
+		{"force-https without tls", "app: a\nservices:\n  s:\n    image: x\n    port: 80\n    http:\n      domain: a.com\n      tls: false\n      force-https: true\n", "force-https needs http.tls"},
+		{"force-https on redirect", "app: a\nservices:\n  s:\n    http:\n      domain: a.com\n      redirect: b.com\n      force-https: true\n", "no effect on a redirect"},
 		{"comma in domain", "app: a\nservices:\n  s:\n    image: x\n    port: 80\n    http:\n      domain: \"a.com,b.com\"\n", `"a.com,b.com" is not a valid domain`},
 		{"space in domains", "app: a\nservices:\n  s:\n    image: x\n    port: 80\n    http:\n      domains: [a.com, \"b .com\"]\n", `"b .com" is not a valid domain`},
 		{"wildcard domain", "app: a\nservices:\n  s:\n    image: x\n    port: 80\n    http:\n      domain: \"*.a.com\"\n", `"*.a.com" is not a valid domain`},

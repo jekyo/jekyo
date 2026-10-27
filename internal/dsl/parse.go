@@ -220,6 +220,13 @@ func validate(app *App) error {
 			if isRedirect && svc.HTTP.WebSocket.Enabled {
 				bad("%s: http.websocket has no effect on a redirect service", p)
 			}
+			if svc.HTTP.ForceHTTPS {
+				if isRedirect {
+					bad("%s: http.force-https has no effect on a redirect service", p)
+				} else if svc.HTTP.TLS != nil && !*svc.HTTP.TLS {
+					bad("%s: http.force-https needs http.tls", p)
+				}
+			}
 			if t := svc.HTTP.Timeout; t != "" {
 				if isRedirect {
 					bad("%s: http.timeout has no effect on a redirect service", p)

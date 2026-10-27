@@ -520,3 +520,55 @@ services:
 		t.Fatalf("no timeout keeps Contour's default: %v", got["plain"])
 	}
 }
+
+func TestCompileForceHTTPS(t *testing.T) {
+	y := `
+app: a
+services:
+  web:
+    image: x
+    port: 3000
+    http:
+      domain: a.example.com
+      force-https: true
+`
+	objs, err := Compile(mustParse(t, y), Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ing *networkingv1.Ingress
+	for _, o := range objs {
+		if i, ok := o.(*networkingv1.Ingress); ok {
+			ing = i
+		}
+	}
+	if ing == nil {
+		t.Fatal("no ingress found")
+	}
+	if ing.Annotations["ingress.kubernetes.io/force-ssl-redirect"] != "true" {
+		t.Fatalf("force-ssl-redirect annotation: %v", ing.Annotations)
+	}
+}
+
+func TestCompileForceHTTPSOffByDefault(t *testing.T) {
+	y := `
+app: a
+services:
+  web:
+    image: x
+    port: 3000
+    http:
+      domain: a.example.com
+`
+	objs, err := Compile(mustParse(t, y), Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, o := range objs {
+		if i, ok := o.(*networkingv1.Ingress); ok {
+			if _, set := i.Annotations["ingress.kubernetes.io/force-ssl-redirect"]; set {
+				t.Fatalf("annotation must be opt-in: %v", i.Annotations)
+			}
+		}
+	}
+}
