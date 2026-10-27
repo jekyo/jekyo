@@ -6,6 +6,27 @@ All notable changes to JEKYO are documented here. The format follows
 may contain breaking changes and patches never do. From 1.0 on, breaking
 changes only land in major versions.
 
+## [0.26.0] - 2026-10-27
+
+### Added
+
+- `http.force-https` answers plain-HTTP requests with a 301 to the https
+  URL instead of serving them in the clear. An app with `tls: true` was
+  still reachable over port 80, so a login or a signing session could
+  travel unencrypted and frameworks that gate the `Secure` cookie flag on
+  the app enforcing SSL set their session cookie without it. Compiles to
+  Contour's `ingress.kubernetes.io/force-ssl-redirect`.
+
+  Off by default, and not implied by `tls:`. The annotation maps to
+  Envoy's `require_tls`, which is scoped to the whole virtual host rather
+  than a single route, so it also covers the HTTP-01 challenge path served
+  over port 80 while a certificate is issued. Renewals follow the redirect,
+  but a first issuance has no certificate for that name yet, so enabling it
+  by default would risk the initial order. Rejected with `tls: false` and
+  on a redirect service, where it has no effect (#31).
+
+  Re-run `jekyo skill install` to refresh installed agent packs.
+
 ## [0.25.3] - 2026-10-26
 
 ### Fixed
