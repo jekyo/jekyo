@@ -219,6 +219,9 @@ jekyo server preflight <user@host> [--storage /storage]   # read-only checks
 jekyo server install <user@host> --ip <ip> [--storage /storage] [--domain d --acme-email e]
                  [--fix] [--pids-limit N] [--no-gpu] [--no-vpn] [--remove-docker]
                                # idempotent; re-run with the SAME flags to converge
+                               # --ip must be an address the server actually
+                               # has: preflight refuses anything else, since
+                               # k3s binds it as --advertise-address
 jekyo server info | harden     # health; fail2ban + automatic security updates
 jekyo context add <user@host> [--name n]   # adopt a server installed elsewhere
 jekyo context ls | use | show [--show-secrets] | export | import

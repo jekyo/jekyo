@@ -185,10 +185,15 @@ func Preflight(f Facts, cfg Config) []CheckResult {
 		if local {
 			add("node ip", Pass, cfg.IP+" is on a local interface")
 		} else {
-			// k3s advertises this address and the kubelet validates it
-			// against the interfaces; when it is missing the node cannot
-			// reach its own API server and every pod loses the network.
-			add("node ip", Warn, fmt.Sprintf("--ip %s is not on any interface (have %s) — typo, or a NAT address k3s cannot bind",
+			// This becomes --advertise-address, which the apiserver has to
+			// bind: with an address the node does not have, the in-cluster
+			// kubernetes endpoint points nowhere, contour's certgen never
+			// writes contourcert, and the install dies minutes later at
+			// "waiting for contour" with nothing naming the real cause.
+			// Blocking, so nothing is written to the server first. A NAT or
+			// elastic address is refused too: it cannot work here today,
+			// since --node-external-ip gets the same value.
+			add("node ip", Fail, fmt.Sprintf("--ip %s is not on any interface (have %s) — fix the address and re-run; k3s has to bind it, so a NAT or elastic address will not work either",
 				cfg.IP, strings.Join(f.Addrs, ", ")))
 		}
 	}

@@ -6,6 +6,22 @@ All notable changes to JEKYO are documented here. The format follows
 may contain breaking changes and patches never do. From 1.0 on, breaking
 changes only land in major versions.
 
+## [Unreleased]
+
+### Changed
+
+- `jekyo server install` now refuses an `--ip` the server does not have
+  instead of warning and continuing. The address is passed to k3s as
+  `--advertise-address`, which the apiserver has to bind; with a wrong one
+  the in-cluster `kubernetes` endpoint points nowhere, so Contour's
+  `certgen` Job never writes its secret, `deploy/contour` never becomes
+  Available, and the install died minutes later at `waiting for contour`
+  with nothing naming the real cause — leaving a server that
+  `jekyo server uninstall` cannot clean up, because no context was saved.
+  The check already existed as a warning; it is now blocking, so nothing is
+  written to the server. A NAT or elastic address is refused too: it cannot
+  work today, since `--node-external-ip` receives the same value.
+
 ## [0.26.0] - 2026-10-27
 
 ### Added

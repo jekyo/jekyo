@@ -228,9 +228,14 @@ func TestPreflightGotchasScoped(t *testing.T) {
 			t.Fatalf("apparmor check without VPN: %+v", r)
 		}
 	}
-	// k3s validates the node IP against local interfaces (the trixy outage)
-	if r := findCheck(t, results, "node ip"); r.Status != Warn || !strings.Contains(r.Detail, "198.51.100.9") {
+	// k3s validates the node IP against local interfaces (the trixy
+	// outage). Blocking: installing on an address the node cannot bind
+	// leaves a cluster whose pods never get a working API endpoint.
+	if r := findCheck(t, results, "node ip"); r.Status != Fail || !strings.Contains(r.Detail, "198.51.100.9") {
 		t.Fatalf("node ip: %+v", r)
+	}
+	if !Blocking(results) {
+		t.Fatal("a node ip the server does not have must stop the install")
 	}
 }
 
