@@ -6,9 +6,9 @@ All notable changes to JEKYO are documented here. The format follows
 may contain breaking changes and patches never do. From 1.0 on, breaking
 changes only land in major versions.
 
-## [Unreleased]
+## [0.26.1] - 2026-10-29
 
-### Changed
+### Fixed
 
 - `jekyo server install` now refuses an `--ip` the server does not have
   instead of warning and continuing. The address is passed to k3s as
@@ -21,6 +21,17 @@ changes only land in major versions.
   The check already existed as a warning; it is now blocking, so nothing is
   written to the server. A NAT or elastic address is refused too: it cannot
   work today, since `--node-external-ip` receives the same value.
+
+- Re-running `jekyo server install` now recovers a cluster whose Contour
+  never came up, instead of failing at `waiting for contour` again. The
+  `contour-certgen` Job writes the `contourcert` secret that
+  `deploy/contour` mounts, and it has `backoffLimit: 1`, so two failures
+  leave it Failed for good — which is what happens when the node IP was
+  wrong and its pods could not reach the API. A converge could not repair
+  that: the manifests are rewritten with identical content, so k3s skips
+  reapplying them, and reapplying would not restart a finished Job anyway.
+  Converge now clears a certgen Job that has not succeeded when the secret
+  is missing, and applies the manifest so it runs again.
 
 ## [0.26.0] - 2026-10-27
 

@@ -192,7 +192,7 @@ func Preflight(f Facts, cfg Config) []CheckResult {
 			// "waiting for contour" with nothing naming the real cause.
 			// Blocking, so nothing is written to the server first. A NAT or
 			// elastic address is refused too: it cannot work here today,
-			// since --node-external-ip gets the same value.
+			// since --node-external-ip gets the same value (issue #32).
 			add("node ip", Fail, fmt.Sprintf("--ip %s is not on any interface (have %s) — fix the address and re-run; k3s has to bind it, so a NAT or elastic address will not work either",
 				cfg.IP, strings.Join(f.Addrs, ", ")))
 		}

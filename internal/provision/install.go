@@ -212,6 +212,31 @@ func (in *Installer) Install(f Facts, creds Credentials) error {
 		return err
 	}
 
+	// contour's certgen Job writes the contourcert secret that deploy/contour
+	// mounts, and it has backoffLimit: 1 — two failures and it stays Failed
+	// for good. Nothing above recovers that: the manifests are rewritten with
+	// identical content, so k3s skips reapplying them, and reapplying would
+	// not restart a finished Job anyway. A converge after a bad --ip (whose
+	// pods could not reach the API) would therefore hang at "waiting for
+	// contour" on every re-run. When the secret is missing, clear any Job
+	// that has not succeeded and apply the manifest so certgen runs again
+	// (issue #32).
+	if err := in.step("ensuring contour certgen", func() error {
+		_, err := in.SSH.Run(`if ! k3s kubectl -n projectcontour get secret contourcert >/dev/null 2>&1; then
+  for j in $(k3s kubectl -n projectcontour get job -o 'jsonpath={range .items[*]}{.metadata.name}:{.status.succeeded} {end}' 2>/dev/null); do
+    case "$j" in
+      *:1) ;;
+      *) k3s kubectl -n projectcontour delete job "${j%%:*}" --wait=false >/dev/null 2>&1 ;;
+    esac
+  done
+  k3s kubectl apply -f ` + k3sManifestsDir + `/jekyo-contour.yaml >/dev/null 2>&1 || true
+fi
+exit 0`)
+		return err
+	}); err != nil {
+		return err
+	}
+
 	type wait struct{ name, ns, resource, cmd string }
 	waits := []wait{
 		{"contour", "projectcontour", "deploy/contour", "kubectl -n projectcontour wait --for=condition=Available deploy/contour --timeout=420s"},
