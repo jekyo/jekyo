@@ -6,6 +6,126 @@ All notable changes to JEKYO are documented here. The format follows
 may contain breaking changes and patches never do. From 1.0 on, breaking
 changes only land in major versions.
 
+## [0.27.0] - 2026-11-02
+
+### Added
+
+- `build.ssh` and `build.secrets` pass credentials to an image build
+  through BuildKit (`--mount=type=ssh`, `--mount=type=secret,id=<key>`),
+  so a service whose dependencies live in a private repository can be
+  built at all. Previously `build:` took only `context`, `dockerfile`,
+  `inline` and `args`, and `args` is the documented wrong place for a
+  secret: build args are recorded in image history. Secret values follow
+  the `files:` shape — a local path, or `from: ${VAR}` for interpolated
+  content — and contribute only their **ids** to the content hash, so
+  rotating a credential does not re-tag and redeploy an identical image.
+  (issue #34)
+
+- `${VAR}` now interpolates in `http.domain`, `http.domains[]` and
+  `http.redirect`, resolved before validation so the DNS check sees the
+  real name. The domain is a per-environment value by nature, and until
+  now the only field of its kind that could not be supplied from the
+  environment; the error also blamed the domain ("is not a valid domain")
+  rather than naming the unset variable. One manifest can now serve
+  several servers, one `--context` each. It does not give two environments
+  on one server: `app:` does not interpolate, so both would claim the same
+  `jekyo-<app>` namespace. (issue #38)
+
+- `volumes:` is allowed together with `schedule:`. A CronJob creates a Job,
+  which creates a Pod, which can mount a PVC like any other — so an
+  incremental batch job can keep a cursor or checkpoint across runs, or
+  use scratch space larger than the container filesystem, instead of
+  becoming a long-running service with an internal scheduler. The job
+  mounts a standalone claim, since a CronJob has no claim template, and
+  `concurrencyPolicy: Forbid` (already the default) keeps two runs off one
+  RWO volume. `http`, `replicas` and `expose` remain excluded: a CronJob
+  has no stable network identity. (issue #35)
+
+- `volumes.<name>.per-replica` gives every replica its own claim, which is
+  what lets a service with local state run more than one replica.
+  `replicas: > 1` with `volumes:` was rejected outright, capping anything
+  with an embedded datastore, a local cache or a shard at one replica. The
+  claim template was already per-replica; what was missing was the
+  accounting around it, so each replica now also gets its own backup
+  CronJob and its own restic repository (`.../<app>/<volume>/r<N>`). A
+  single job would have backed up replica 0 and left the rest silently
+  unprotected. `jekyo backup now|ls|restore` therefore takes
+  `<app>/<volume>/<replica>` for these volumes, and refuses an ambiguous
+  target rather than resolving it to replica 0. Volumes without
+  `per-replica` keep their existing job name and repository path
+  untouched. (issue #36)
+
+- `security.apparmor` selects a container's AppArmor profile
+  (`runtime-default`, `unconfined`, or `localhost/<profile>`), mapping 1:1
+  onto `securityContext.appArmorProfile`. Left unset, nothing is emitted,
+  so a node with a corrected default keeps it. (issue #33)
+
+- `jekyo volume copy <app>/<volume>[/<replica>] --from <ctx> --to <ctx>`
+  copies a volume's contents between servers, for moving a stateful app.
+  `jekyo backup restore` only works when both clusters share a backup
+  target, and a fresh server often has none, which left hand-made helper
+  pods or `sudo tar` over SSH. The copy resolves each side's claim through
+  the API, refuses to run while any pod still mounts either volume, moves
+  data node to node as a tar stream preserving owners and modes, and
+  compares a SHA-256 over every file on both sides afterwards. It is not
+  resumable; an interrupted copy has to be rerun. (issue #26)
+
+- `jekyo context rename <old> <new>` renames a context in place, keeping
+  its kubeconfig, registry logins and VPN details, and following the
+  current-context setting. `jekyo server install` names a context after
+  the server's IP, and that name was permanent: the only way to change it
+  was `context rm` plus `context add`, a destructive operation for a
+  cosmetic result that also needed working SSH. Entirely local — nothing
+  on the server records the context name. (issue #39)
+
+### Changed
+
+- **Breaking for GPU services.** `gpu: N` now requests `nvidia.com/gpu: N`
+  so the Kubernetes scheduler accounts for cards, and jekyo installs the
+  NVIDIA device plugin on any server where it detects a GPU. Before this,
+  `gpu:` set `NVIDIA_VISIBLE_DEVICES=all` and requested no resource at
+  all: every service saw every card, all of them defaulted to device 0,
+  and the scheduler saw no contention — so two services each declaring
+  `gpu: 1` on a two-GPU node both ran on one card while the other sat
+  idle, surfacing as a CUDA out-of-memory failure with no cause visible
+  from the manifest. `count` was entirely inert; `gpu: 2` rendered
+  identically to `gpu: 1`.
+
+  `gpu: {devices: "0,2"}` still pins cards by hand and now deliberately
+  bypasses scheduling: it sets `NVIDIA_VISIBLE_DEVICES` and requests
+  nothing, which is the way to share one card between services on
+  purpose. Nothing accounts for pinned cards.
+
+  On a cluster without the device plugin a GPU service stays Pending with
+  only the scheduler's "Insufficient nvidia.com/gpu" to go on, so
+  `jekyo up` warns when no node advertises the resource and names the
+  remedy: re-run `jekyo server install` with the same flags. (issue #37)
+
+### Fixed
+
+- `jekyo server install` now repairs containerd's AppArmor profile on
+  hosts running AppArmor 4 or newer (Ubuntu 26.04), where no process in
+  any container could signal another — not even its own child. containerd
+  generates its default profile with signal and ptrace rules bound to the
+  bare profile name, but a container's label is the stacked
+  `cri-containerd.apparmor.d//&unconfined`, which those peer patterns do
+  not match. Single-process images were unaffected; anything that signals
+  its own processes was not, including the `postgres` template, which
+  could not start on a default install: `gosu` spun without ever exec'ing
+  Postgres, `initdb` could not stop its temporary server
+  (`pg_ctl: could not send stop signal ... Permission denied`), and
+  recovery then failed forever on
+  `FATAL: could not signal for checkpoint`. Graceful shutdown in Node,
+  Python and others broke the same way.
+
+  jekyo now installs containerd's own profile with the peer patterns
+  widened to match the stacked label, and nothing else changed, so signal
+  mediation is the only difference. It is applied on every install rather
+  than behind `--fix`, since it is a correctness fix and not a policy
+  choice; `jekyo server preflight` reports the condition on an existing
+  server and `install --fix` repairs it without a full converge.
+  (issue #33)
+
 ## [0.26.1] - 2026-10-29
 
 ### Fixed
