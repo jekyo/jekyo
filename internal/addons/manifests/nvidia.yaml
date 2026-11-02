@@ -6,3 +6,56 @@ kind: RuntimeClass
 metadata:
   name: nvidia
 handler: nvidia
+---
+# NVIDIA device plugin — advertises nvidia.com/gpu so the scheduler can
+# account for cards. Without it `gpu: 1` granted NVIDIA_VISIBLE_DEVICES=all
+# and requested nothing, so two services both landed on card 0 while the
+# others sat idle (issue #37).
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: nvidia-device-plugin
+  namespace: kube-system
+  labels:
+    app: nvidia-device-plugin
+spec:
+  selector:
+    matchLabels:
+      app: nvidia-device-plugin
+  updateStrategy:
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app: nvidia-device-plugin
+    spec:
+      runtimeClassName: nvidia
+      priorityClassName: system-node-critical
+      tolerations:
+        - operator: Exists
+          effect: NoSchedule
+        - operator: Exists
+          effect: NoExecute
+      containers:
+        - name: nvidia-device-plugin-ctr
+          image: nvcr.io/nvidia/k8s-device-plugin:v0.17.1
+          env:
+            # Report the node's cards even when the plugin itself was given
+            # a restricted view.
+            - name: NVIDIA_VISIBLE_DEVICES
+              value: all
+            - name: NVIDIA_DRIVER_CAPABILITIES
+              value: compute,utility
+            # A pod that asks for a GPU it cannot get should fail, not run
+            # without one.
+            - name: FAIL_ON_INIT_ERROR
+              value: "true"
+          securityContext:
+            privileged: true
+          volumeMounts:
+            - name: device-plugin
+              mountPath: /var/lib/kubelet/device-plugins
+      volumes:
+        - name: device-plugin
+          hostPath:
+            path: /var/lib/kubelet/device-plugins

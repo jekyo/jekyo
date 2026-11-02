@@ -1,6 +1,7 @@
 package provision
 
 import (
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -35,8 +36,18 @@ type Facts struct {
 	// profile that attaches by path, so it also confines the VPN
 	// container's wg-quick and blocks it from running busybox.
 	WGQuickAppArmor bool
-	Addrs           []string  // IPs on the server's interfaces
-	LVM             *LVMFacts // set when the storage path sits on an LV
+	// AppArmorMajor is the major version of apparmor_parser, 0 when
+	// AppArmor is not in use. From 4 on, a container's label is the
+	// stacked "cri-containerd.apparmor.d//&unconfined", which
+	// containerd's own signal rules (written against the bare profile
+	// name) no longer match — so nothing in a container can signal
+	// anything, including its own children (issue #33).
+	AppArmorMajor int
+	// CriAppArmorManaged: the corrected containerd profile is already in
+	// place, so the fix is a no-op.
+	CriAppArmorManaged bool
+	Addrs              []string  // IPs on the server's interfaces
+	LVM                *LVMFacts // set when the storage path sits on an LV
 }
 
 type AptSource struct {
@@ -92,6 +103,8 @@ p secureboot; mokutil --sb-state 2>/dev/null; true
 p nouveau; lsmod | grep -c '^nouveau '; true
 p aptmissing; for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do [ -f "$f" ] || continue; grep -vE '^[[:space:]]*#' "$f" | grep -oE 'file:/[^] ]+' | while read -r u; do d=${u#file:}; [ -d "$d" ] || echo "$f $d"; done; done; true
 p apparmor; grep -E '^wg-quick \(enforce\)' /sys/kernel/security/apparmor/profiles 2>/dev/null; true
+p aaver; [ -d /sys/kernel/security/apparmor ] && apparmor_parser --version 2>/dev/null | head -1; true
+p aamanaged; grep -lq 'Managed by JEKYO' /etc/apparmor.d/cri-containerd.apparmor.d 2>/dev/null && echo yes; true
 p addrs; ip -o addr show 2>/dev/null | awk '{print $4}' | cut -d/ -f1
 p lvm; src=$(df -P "$d" | tail -1 | awk '{print $1}'); sz=$(lvs --noheadings --nosuffix --units b -o lv_size,vg_free "$src" 2>/dev/null) && echo "$src $sz"; true
 p end
@@ -170,6 +183,10 @@ func ParseFacts(out string) Facts {
 		}
 	}
 	f.WGQuickAppArmor = sections["apparmor"] != ""
+	if m := aaVersionRe.FindStringSubmatch(sections["aaver"]); m != nil {
+		f.AppArmorMajor, _ = strconv.Atoi(m[1])
+	}
+	f.CriAppArmorManaged = strings.TrimSpace(sections["aamanaged"]) == "yes"
 	if s := sections["addrs"]; s != "" {
 		f.Addrs = strings.Fields(s)
 	}
@@ -229,3 +246,6 @@ func parseListeners(out string) []Listener {
 	}
 	return res
 }
+
+// aaVersionRe pulls the major version out of "AppArmor parser version 5.0.2".
+var aaVersionRe = regexp.MustCompile(`version (\d+)\.`)

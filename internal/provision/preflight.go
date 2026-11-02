@@ -217,6 +217,18 @@ func Preflight(f Facts, cfg Config) []CheckResult {
 		addFix("apparmor: wg-quick", Warn, "Ubuntu's wg-quick profile also confines the VPN container's wg-quick and it crash-loops (fix disables only that profile)",
 			"ln -sf /etc/apparmor.d/wg-quick /etc/apparmor.d/disable/wg-quick && apparmor_parser -R /etc/apparmor.d/wg-quick")
 	}
+	// AppArmor 4 changed a container's label to the stacked form, which
+	// containerd's generated signal rules do not match: no process in any
+	// container can signal another, not even its own child. Single-process
+	// images are fine; postgres, gosu and graceful shutdown in Node or
+	// Python are not (issue #33).
+	if f.AppArmorMajor >= 4 && !f.CriAppArmorManaged {
+		addFix("apparmor: container signals", Warn,
+			fmt.Sprintf("apparmor_parser %d denies signals between processes in a container (postgres and other multi-process images break); fix installs containerd's profile with peer patterns that match the container's stacked label", f.AppArmorMajor),
+			criAppArmorFixCmd())
+	} else if f.CriAppArmorManaged {
+		add("apparmor: container signals", Pass, "corrected containerd profile installed")
+	}
 	if cfg.PidsLimit != 0 {
 		// below this a pod's pause container, a shell and a probe can
 		// already exhaust it, and failures look nothing like a limit

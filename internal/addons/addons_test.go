@@ -90,3 +90,46 @@ func keys(m map[string]string) []string {
 	}
 	return out
 }
+
+// Issue #37: a GPU server gets the device plugin as well as the
+// RuntimeClass, or nvidia.com/gpu is never advertised and every
+// GPU-requesting pod stays Pending.
+func TestRenderGPUIncludesDevicePlugin(t *testing.T) {
+	files, err := Render(Values{GPU: true, Domain: "example.com", AcmeEmail: "a@example.com"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var nvidia string
+	for _, f := range files {
+		if f.Name == "jekyo-nvidia.yaml" {
+			nvidia = string(f.Data)
+		}
+	}
+	if nvidia == "" {
+		t.Fatal("no jekyo-nvidia.yaml rendered")
+	}
+	for _, want := range []string{
+		"kind: RuntimeClass",
+		"kind: DaemonSet",
+		"name: nvidia-device-plugin",
+		"k8s-device-plugin",
+		"runtimeClassName: nvidia",
+		"/var/lib/kubelet/device-plugins",
+	} {
+		if !strings.Contains(nvidia, want) {
+			t.Errorf("nvidia manifest missing %q", want)
+		}
+	}
+}
+
+func TestRenderWithoutGPUHasNoDevicePlugin(t *testing.T) {
+	files, err := Render(Values{GPU: false})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range files {
+		if strings.Contains(string(f.Data), "nvidia-device-plugin") {
+			t.Fatalf("%s ships the device plugin on a non-GPU server", f.Name)
+		}
+	}
+}

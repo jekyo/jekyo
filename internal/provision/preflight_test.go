@@ -46,6 +46,8 @@ SecureBoot enabled
 1
 ===JEKYO===aptmissing
 ===JEKYO===apparmor
+===JEKYO===aaver
+===JEKYO===aamanaged
 ===JEKYO===addrs
 127.0.0.1
 203.0.113.7
@@ -162,6 +164,7 @@ func gotchas(t *testing.T) Facts {
 	out := strings.Replace(sampleFactsOutput, "===JEKYO===aptmissing\n",
 		"===JEKYO===aptmissing\n/etc/apt/sources.list.d/nvidia-driver-local.list /var/nvidia-driver-local-repo\n", 1)
 	out = strings.Replace(out, "===JEKYO===apparmor\n", "===JEKYO===apparmor\nwg-quick (enforce)\n", 1)
+	out = strings.Replace(out, "===JEKYO===aaver\n", "===JEKYO===aaver\nAppArmor parser version 5.0.2\n", 1)
 	out = strings.Replace(out, "===JEKYO===lvm\n",
 		"===JEKYO===lvm\n/dev/mapper/ubuntu--vg-ubuntu--lv 107374182400 1846835822592\n", 1)
 	out = strings.Replace(out, `VERSION_ID="24.04"`, `VERSION_ID="26.04"`, 1)
@@ -273,5 +276,91 @@ func TestPreflightPidsLimit(t *testing.T) {
 	}
 	if r := findCheck(t, Preflight(f, Config{StoragePath: "/s", PidsLimit: 4096}), "pids limit"); r.Status != Pass {
 		t.Fatalf("4096: %+v", r)
+	}
+}
+
+// Issue #33: AppArmor 4+ denies signals between processes in a container,
+// so a default install cannot run the postgres template. Preflight has to
+// name it, and offer the fix.
+func TestPreflightAppArmorContainerSignals(t *testing.T) {
+	f := gotchas(t)
+	if f.AppArmorMajor != 5 {
+		t.Fatalf("apparmor version not parsed: %d", f.AppArmorMajor)
+	}
+	if f.CriAppArmorManaged {
+		t.Fatal("a box without the corrected profile must not report it as managed")
+	}
+	r := findCheck(t, Preflight(f, Config{StoragePath: "/storage", NoGPU: true, NoVPN: true}), "apparmor: container signals")
+	if r.Status != Warn {
+		t.Fatalf("status: %+v", r)
+	}
+	if !r.Fixable || r.FixCmd == "" {
+		t.Fatalf("must be fixable: %+v", r)
+	}
+	for _, want := range []string{"postgres", "signals"} {
+		if !strings.Contains(r.Detail, want) {
+			t.Errorf("detail should mention %q: %q", want, r.Detail)
+		}
+	}
+	// the fix writes the profile and loads it
+	for _, want := range []string{CriAppArmorPath, "apparmor_parser -r", "Managed by JEKYO", "cri-containerd.apparmor.d//&*"} {
+		if !strings.Contains(r.FixCmd, want) {
+			t.Errorf("fix command missing %q", want)
+		}
+	}
+}
+
+// AppArmor 3 and earlier match the bare profile name, so there is nothing
+// to fix and no warning to raise.
+func TestPreflightAppArmor3IsQuiet(t *testing.T) {
+	out := strings.Replace(sampleFactsOutput, "===JEKYO===aaver\n", "===JEKYO===aaver\nAppArmor parser version 3.0.4\n", 1)
+	f := ParseFacts(out)
+	if f.AppArmorMajor != 3 {
+		t.Fatalf("version: %d", f.AppArmorMajor)
+	}
+	for _, r := range Preflight(f, Config{StoragePath: "/storage"}) {
+		if r.Name == "apparmor: container signals" {
+			t.Fatalf("apparmor 3 must not be flagged: %+v", r)
+		}
+	}
+}
+
+// Once the corrected profile is in place the check passes instead of
+// repeating the warning on every converge.
+func TestPreflightAppArmorAlreadyManaged(t *testing.T) {
+	out := strings.Replace(sampleFactsOutput, "===JEKYO===aaver\n", "===JEKYO===aaver\nAppArmor parser version 5.0.2\n", 1)
+	out = strings.Replace(out, "===JEKYO===aamanaged\n", "===JEKYO===aamanaged\nyes\n", 1)
+	f := ParseFacts(out)
+	if !f.CriAppArmorManaged {
+		t.Fatal("managed profile not detected")
+	}
+	r := findCheck(t, Preflight(f, Config{StoragePath: "/storage"}), "apparmor: container signals")
+	if r.Status != Pass || r.Fixable {
+		t.Fatalf("want a quiet pass, got %+v", r)
+	}
+}
+
+// The embedded profile must be the containerd default plus wider signal
+// peers — nothing else, or replacing it changes more than intended.
+func TestCriAppArmorProfileShape(t *testing.T) {
+	for _, want := range []string{
+		"profile cri-containerd.apparmor.d flags=(attach_disconnected,mediate_deleted)",
+		"signal (send,receive) peer=cri-containerd.apparmor.d//&*",
+		"ptrace (trace,read,tracedby,readby) peer=cri-containerd.apparmor.d//&*",
+		"deny mount,",
+		"deny @{PROC}/sysrq-trigger rwklx,",
+		"deny /sys/firmware/** rwklx,",
+	} {
+		if !strings.Contains(criAppArmorProfile, want) {
+			t.Errorf("profile missing %q", want)
+		}
+	}
+	// it must not quietly grant anything broad
+	for _, forbidden := range []string{"signal,", "ptrace,", "mount,\n"} {
+		for _, line := range strings.Split(criAppArmorProfile, "\n") {
+			if strings.TrimSpace(line) == strings.TrimSpace(forbidden) {
+				t.Errorf("profile grants unqualified %q", forbidden)
+			}
+		}
 	}
 }

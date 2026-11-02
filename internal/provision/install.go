@@ -111,6 +111,26 @@ func (in *Installer) Install(f Facts, creds Credentials) error {
 	gpu := len(f.GPUs) > 0 && !cfg.NoGPU
 	vpn := !cfg.NoVPN && f.Wireguard
 
+	// Container signals must work before anything that signals its own
+	// children is deployed: under AppArmor 4+ containerd's generated
+	// profile denies them outright, and the postgres template cannot
+	// start on a default install (issue #33). This is a correctness fix
+	// rather than a policy choice, so it is not gated behind --fix; it
+	// only widens signal and ptrace peer patterns to match the stacked
+	// label a container carries.
+	if f.AppArmorMajor >= 4 {
+		if err := in.step("fixing containerd AppArmor signal rules", func() error {
+			current, _ := in.SSH.ReadFile(CriAppArmorPath)
+			if strings.TrimRight(string(current), "\n") == strings.TrimRight(criAppArmorProfile, "\n") {
+				return nil // already ours: loading it again would be a no-op
+			}
+			_, err := in.SSH.Run(criAppArmorFixCmd())
+			return err
+		}); err != nil {
+			return err
+		}
+	}
+
 	// containerd registry config must exist before k3s starts.
 	registriesChanged := false
 	if err := in.step("configuring containerd registry mirror", func() error {
