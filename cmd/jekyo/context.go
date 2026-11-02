@@ -26,6 +26,7 @@ func newContextCmd() *cobra.Command {
 		newContextLsCmd(),
 		newContextUseCmd(),
 		newContextRmCmd(),
+		newContextRenameCmd(),
 		newContextShowCmd(),
 		newContextExportCmd(),
 		newContextImportCmd(),
@@ -163,6 +164,32 @@ func newContextRmCmd() *cobra.Command {
 				return err
 			}
 			cmd.Println("Removed context:", args[0])
+			return nil
+		},
+	}
+}
+
+func newContextRenameCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "rename <old> <new>",
+		Short: "Rename a context (local only; the server is untouched)",
+		Long: `Renames a context in place, keeping its kubeconfig, registry logins and
+VPN details. Nothing on the server records the context name, so this needs
+no connection to it. If the renamed context was current, it stays current.
+
+Useful after 'jekyo server install', which names a context after the
+server's IP.`,
+		Args: cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			store, err := contexts.Open()
+			if err != nil {
+				return err
+			}
+			if err := store.Rename(args[0], args[1]); err != nil {
+				return err
+			}
+			cmd.Printf("Renamed context: %s -> %s\n", args[0], args[1])
+			cmd.Println("Update any --context flags in scripts that still name the old one.")
 			return nil
 		},
 	}

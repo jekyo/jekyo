@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"time"
 
@@ -286,4 +287,44 @@ func (s *Store) Import(blob string) (string, error) {
 		return "", err
 	}
 	return e.Meta.Name, nil
+}
+
+// contextNameRe is what a context name may contain. The name is also a
+// directory under ~/.jekyo/contexts, so anything with a separator or a
+// leading dot has to be refused rather than normalised.
+var contextNameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
+
+// ValidName reports whether s is usable as a context name.
+func ValidName(s string) bool { return contextNameRe.MatchString(s) }
+
+// Rename moves a context to a new name, keeping its kubeconfig and
+// metadata, and follows it with the current-context setting. Entirely
+// local: nothing on the server records the context name (issue #39).
+func (s *Store) Rename(oldName, newName string) error {
+	if !ValidName(newName) {
+		return fmt.Errorf("context name %q must be letters, digits, dot, dash or underscore (max 64)", newName)
+	}
+	if oldName == newName {
+		return fmt.Errorf("context %q already has that name", oldName)
+	}
+	m, err := s.Get(oldName)
+	if err != nil {
+		return err
+	}
+	if _, err := s.Get(newName); err == nil {
+		return fmt.Errorf("context %q already exists", newName)
+	}
+	if err := os.Rename(s.dir(oldName), s.dir(newName)); err != nil {
+		return err
+	}
+	// The name is recorded inside meta.yaml too; a stale one there would
+	// make `context show` disagree with `context ls`.
+	m.Name = newName
+	if err := s.Save(m); err != nil {
+		return err
+	}
+	if cur, _ := s.CurrentName(); cur == oldName {
+		return s.setCurrent(newName)
+	}
+	return nil
 }
