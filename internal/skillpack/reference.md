@@ -22,6 +22,14 @@ services:               # required, at least one
         FROM alpine
       args:                   # build args
         KEY: value
+      ssh: true               # forward the SSH agent (--mount=type=ssh), for
+                              # private git dependencies during build
+      secrets:                # build-time credentials via BuildKit, NEVER
+        npmrc: ./.npmrc       # build args (args land in image history).
+        netrc:                # a bare value is a local path, like files:;
+          from: ${NETRC}      # from: is interpolated content. Consume it in
+                              # the Dockerfile with
+                              # RUN --mount=type=secret,id=netrc ...
 
     command: ["binary"]       # container entrypoint override
     args: ["--flag"]          # container args
@@ -32,7 +40,9 @@ services:               # required, at least one
     port: 8080                # main port (sugar for one-element ports:)
     ports: [8080, 9090]       # several ports
     http:                     # publish on a domain via ingress
-      domain: api.example.com # required inside http (or domains:)
+      domain: api.example.com # required inside http (or domains:); ${VAR}
+                              # interpolates here, so one manifest serves
+                              # several servers (quote it inside a [] list)
       domains: [example.com, api.example.com]
                               # several hosts, one service; exclusive with
                               # domain:. Every other http field applies to
@@ -61,7 +71,8 @@ services:               # required, at least one
       memory: 512Mi
       cpu-max: "1"            # hard caps (limits); unset = uncapped
       memory-max: 1Gi
-    replicas: 2               # default 1; >1 not allowed with volumes
+    replicas: 2               # default 1; >1 with volumes needs every one
+                              # of them to set per-replica: true
     stateful: true            # force StatefulSet; implied by volumes:
     health:
       path: /healthz          # HTTP probe, OR:
@@ -92,6 +103,11 @@ services:               # required, at least one
       run-as: 1000
       read-only-root: true
       no-new-privileges: true
+      apparmor: unconfined    # runtime-default | unconfined |
+                              # localhost/<profile>. An escape hatch for a
+                              # broken host profile; jekyo already fixes the
+                              # containerd default at install, so reach for
+                              # this only when a specific image needs it
     network:
       host: true              # host networking (excludes egress policy)
       egress: restricted      # or internal; enforced NetworkPolicy presets
@@ -102,8 +118,18 @@ services:               # required, at least one
     metrics:
       path: /metrics          # prometheus scrape annotations
       port: 9100
-    gpu: 1                    # NVIDIA runtime; or {count: 1, devices: "0,2"}
-    schedule: "0 3 * * *"     # makes this a CronJob; excludes http/replicas/volumes/expose
+    gpu: 1                    # request N GPUs as nvidia.com/gpu, so the
+                              # scheduler accounts for them and two services
+                              # never land on one card. Needs the device
+                              # plugin (installed when a GPU is detected);
+                              # without it the pod stays Pending.
+                              # {count: 1, devices: "0,2"} pins cards instead
+                              # and bypasses scheduling entirely: nothing
+                              # accounts for pinned cards
+    schedule: "0 3 * * *"     # makes this a CronJob; excludes http/replicas/
+                              # expose. volumes: ARE allowed (a cursor or
+                              # scratch space): the job mounts a standalone
+                              # claim and runs never overlap
     volumes:
       data: /var/lib/data     # volume name -> mount path, OR share one volume:
       shared:
@@ -115,6 +141,9 @@ volumes:                # required for every volume mounted above
     size: 10Gi          # required
     class: local-path   # optional storage class
     access: rwo         # or rwx (ReadWriteMany; storage class must support it)
+    per-replica: true   # give each replica its own claim; required for
+                        # replicas > 1 on a service with volumes. Each
+                        # replica also gets its own backup and repository
     backup:             # optional scheduled backups (restic to S3)
       schedule: "0 3 * * *"   # cron; jekyo init also accepts 15m/hourly/daily
       keep: 7                 # snapshots retained
@@ -130,6 +159,14 @@ inputs:                 # TEMPLATES ONLY; resolved and stripped by jekyo init
 - Services reach each other by service name (`db:5432`) within the app.
 - `volumes:` on a service implies a StatefulSet; data survives `jekyo down`
   (only `jekyo down --volumes` deletes it).
+- `${VAR}` interpolates in `env:`, `secrets:`, `files:`, `build.secrets:`
+  and the `http:` hosts (`domain`, `domains`, `redirect`). It does NOT
+  interpolate in `app:`, so one manifest serves several servers (one
+  `--context` each), not two environments on one server: both would want
+  the same `jekyo-<app>` namespace. An unset variable is always an error.
+- A GPU is scheduled, not shared: `gpu: N` requests `nvidia.com/gpu`. Pin
+  cards with `devices:` only to deliberately share one, and know that
+  nothing then accounts for them.
 - A volume mounted by several services (via subpath) becomes one shared
   claim with one size.
 - `http:` gives the service a TLS URL automatically on clusters installed
@@ -141,6 +178,10 @@ inputs:                 # TEMPLATES ONLY; resolved and stripped by jekyo init
   server at /var/lib/jekyo/backups (mount a dedicated disk there). Then
   `jekyo backup now|ls|restore <app>/<volume>`. Restore stops the app,
   replaces the volume, and restarts it.
+- A per-replica volume has one claim, one backup CronJob and one restic
+  repository per replica, so `jekyo backup now|ls|restore` needs the
+  ordinal: `<app>/<volume>/<replica>`. It is refused without one rather
+  than resolved to replica 0.
 - A volume with `backup:` on a server without a backup target still
   deploys: its backup CronJob is created suspended and `jekyo up` warns.
   Run `jekyo backup config`, then `jekyo up` again to schedule it.
@@ -211,7 +252,10 @@ jekyo down [app] [--volumes]
 
 jekyo templates [query] | templates inspect <name> [-o json]   # catalog; query fuzzy-searches name+description
 jekyo init <name> [--defaults] [--set NAME=value] [--backup daily]
-jekyo backup config|now|ls|restore
+jekyo backup config|now|ls|restore   # <app>/<volume>[/<replica>]
+jekyo volume copy <app>/<volume> --from <ctx> --to <ctx>
+                               # move a stateful app between servers: deploy
+                               # on the destination, stop both sides, copy
 jekyo registry login <host>
 jekyo images | build [-f file]
 jekyo vpn peers | add-peer | rm-peer | config
@@ -224,7 +268,8 @@ jekyo server install <user@host> --ip <ip> [--storage /storage] [--domain d --ac
                                # k3s binds it as --advertise-address
 jekyo server info | harden     # health; fail2ban + automatic security updates
 jekyo context add <user@host> [--name n]   # adopt a server installed elsewhere
-jekyo context ls | use | show [--show-secrets] | export | import
+jekyo context ls | use | rename <old> <new> | show [--show-secrets]
+jekyo context export | import
                                # show masks passwords; only pass --show-secrets when a password is needed
 jekyo kubectl [-- args]        # escape hatch for inspection; honors --context
 jekyo schema                   # JSON Schema for validation

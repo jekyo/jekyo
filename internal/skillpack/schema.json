@@ -46,6 +46,10 @@
             "type": "string",
             "description": "Storage class (default local-path)"
           },
+          "per-replica": {
+            "type": "boolean",
+            "description": "Give each replica its own claim; required for replicas > 1"
+          },
           "backup": {
             "type": "object",
             "additionalProperties": false,
@@ -104,6 +108,35 @@
               "type": "object",
               "additionalProperties": {
                 "type": "string"
+              }
+            },
+            "ssh": {
+              "type": "boolean",
+              "description": "Forward the SSH agent into the build (BuildKit --mount=type=ssh)"
+            },
+            "secrets": {
+              "type": "object",
+              "description": "Build-time credentials via BuildKit, never build args",
+              "additionalProperties": {
+                "oneOf": [
+                  {
+                    "type": "string",
+                    "description": "Local file path"
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "path": {
+                        "type": "string"
+                      },
+                      "from": {
+                        "type": "string",
+                        "description": "Interpolated content, e.g. ${NETRC}"
+                      }
+                    }
+                  }
+                ]
               }
             }
           }
@@ -400,6 +433,11 @@
                   },
                   "no-new-privileges": {
                     "type": "boolean"
+                  },
+                  "apparmor": {
+                    "type": "string",
+                    "pattern": "^(runtime-default|unconfined|localhost/[A-Za-z0-9._-]+)$",
+                    "description": "AppArmor profile: runtime-default, unconfined, or localhost/<profile>"
                   }
                 },
                 "additionalProperties": false
@@ -474,6 +512,11 @@
                   },
                   "no-new-privileges": {
                     "type": "boolean"
+                  },
+                  "apparmor": {
+                    "type": "string",
+                    "pattern": "^(runtime-default|unconfined|localhost/[A-Za-z0-9._-]+)$",
+                    "description": "AppArmor profile: runtime-default, unconfined, or localhost/<profile>"
                   }
                 },
                 "additionalProperties": false
@@ -507,6 +550,11 @@
             },
             "no-new-privileges": {
               "type": "boolean"
+            },
+            "apparmor": {
+              "type": "string",
+              "pattern": "^(runtime-default|unconfined|localhost/[A-Za-z0-9._-]+)$",
+              "description": "AppArmor profile: runtime-default, unconfined, or localhost/<profile>"
             }
           },
           "additionalProperties": false
