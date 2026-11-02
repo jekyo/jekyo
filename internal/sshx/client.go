@@ -232,6 +232,27 @@ func (c *Client) Stream(cmd string, w io.Writer) error {
 	return nil
 }
 
+// StreamStdout executes cmd as root with ONLY stdout streamed to w, so a
+// binary payload (a tar) arrives uncorrupted; stderr is captured and
+// returned for the error message. Stream() mixes the two and must not be
+// used for binary data.
+func (c *Client) StreamStdout(cmd string, w io.Writer) (string, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	sess, err := c.conn.NewSession()
+	if err != nil {
+		return "", err
+	}
+	defer sess.Close()
+	var errBuf bytes.Buffer
+	sess.Stdout = w
+	sess.Stderr = &errBuf
+	if err := sess.Run(c.sudo(cmd)); err != nil {
+		return errBuf.String(), fmt.Errorf("remote command failed: %s: %s", cmd, firstLines(errBuf.String(), 12))
+	}
+	return errBuf.String(), nil
+}
+
 // WriteFile writes data to path on the server (as root), creating parent
 // directories, with the given mode (e.g. "0600").
 func (c *Client) WriteFile(path string, data []byte, mode string) error {

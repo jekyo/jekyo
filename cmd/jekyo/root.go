@@ -34,7 +34,7 @@ Start with:
 	groups := map[string][]*cobra.Command{
 		"apps":    {newInitCmd(), newUpCmd(), newDownCmd(), newLsCmd(), newTemplatesCmd()},
 		"observe": {newPsCmd(), newLogsCmd(), newExecCmd(), newAttachCmd(), newUICmd(), newTopCmd(), newStatusCmd()},
-		"operate": {newRestartCmd(), newHistoryCmd(), newRollbackCmd(), newBackupCmd()},
+		"operate": {newRestartCmd(), newHistoryCmd(), newRollbackCmd(), newBackupCmd(), newVolumeCmd()},
 		"servers": {newServerCmd(), newContextCmd(), newVPNCmd(), newRegistryCmd()},
 		"tooling": {newSkillCmd(), newRenderCmd(), newSchemaCmd(), newBuildCmd(), newImagesCmd(), newKubectlCmd(), newUpdateCmd(), newVersionCmd()},
 	}
