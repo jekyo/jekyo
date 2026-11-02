@@ -119,44 +119,97 @@ data protects against mistakes, not hardware.`,
 	return cmd
 }
 
-// backupTarget resolves <app>/<volume> and the volume's PVC claim name from
-// the deployed release manifest.
-func backupTarget(ctx context.Context, d *deploy.Deployer, arg string) (appName, volName, claimName string, err error) {
-	appName, volName = splitTarget(arg)
+// backupTarget resolves <app>/<volume>[/<replica>] to the volume's PVC claim
+// name and restic repository suffix, from the deployed release manifest. The
+// third segment addresses one replica of a per-replica volume, which has a
+// claim and a repository per replica (issue #36).
+func backupTarget(ctx context.Context, d *deploy.Deployer, arg string) (appName, volName, claimName, repoSuffix string, err error) {
+	appName, volName, replica := splitTarget3(arg)
 	if volName == "" {
-		return "", "", "", fmt.Errorf("target must be <app>/<volume>")
+		return "", "", "", "", fmt.Errorf("target must be <app>/<volume>[/<replica>]")
 	}
 	ns := compile.NamespaceFor(appName)
-	// The scheduled CronJob (if any) knows the claim; otherwise fall back to
-	// PVCs present in the namespace.
-	cj, err := d.Client.Typed.BatchV1().CronJobs(ns).Get(ctx, "backup-"+volName, metav1.GetOptions{})
-	if err == nil {
+
+	// The scheduled CronJobs know their claims; a per-replica volume has
+	// one per ordinal, so an ambiguous target has to be refused rather
+	// than resolved to an arbitrary replica.
+	jobs, lerr := d.Client.Typed.BatchV1().CronJobs(ns).List(ctx, metav1.ListOptions{
+		LabelSelector: "jekyo.io/volume=" + volName + ",jekyo.io/backup=true",
+	})
+	if lerr == nil && len(jobs.Items) > 0 {
+		byReplica := map[string]batchv1.CronJob{}
+		for _, cj := range jobs.Items {
+			byReplica[cj.Labels["jekyo.io/replica"]] = cj
+		}
+		cj, ok := byReplica[replica]
+		if !ok {
+			var have []string
+			for r := range byReplica {
+				if r != "" {
+					have = append(have, r)
+				}
+			}
+			sort.Strings(have)
+			if replica == "" && len(have) > 0 {
+				return "", "", "", "", fmt.Errorf("%s/%s is per-replica: name one of replicas %s, e.g. %s/%s/%s",
+					appName, volName, strings.Join(have, ", "), appName, volName, have[0])
+			}
+			return "", "", "", "", fmt.Errorf("no replica %q of volume %q in app %q", replica, volName, appName)
+		}
 		for _, v := range cj.Spec.JobTemplate.Spec.Template.Spec.Volumes {
 			if v.PersistentVolumeClaim != nil {
-				return appName, volName, v.PersistentVolumeClaim.ClaimName, nil
+				return appName, volName, v.PersistentVolumeClaim.ClaimName, replicaRepoSuffix(replica), nil
 			}
 		}
 	}
+
+	// No backup: schedule on this volume — fall back to the PVCs present.
 	pvcs, lerr := d.Client.Typed.CoreV1().PersistentVolumeClaims(ns).List(ctx, metav1.ListOptions{})
 	if lerr != nil {
-		return "", "", "", lerr
+		return "", "", "", "", lerr
 	}
+	var matches []string
 	for _, p := range pvcs.Items {
 		if p.Name == volName || strings.HasPrefix(p.Name, volName+"-") {
-			return appName, volName, p.Name, nil
+			matches = append(matches, p.Name)
 		}
 	}
-	return "", "", "", fmt.Errorf("no volume %q found in app %q (is the app deployed?)", volName, appName)
+	sort.Strings(matches)
+	switch {
+	case len(matches) == 0:
+		return "", "", "", "", fmt.Errorf("no volume %q found in app %q (is the app deployed?)", volName, appName)
+	case replica != "":
+		want := "-" + replica
+		for _, m := range matches {
+			if strings.HasSuffix(m, want) {
+				return appName, volName, m, replicaRepoSuffix(replica), nil
+			}
+		}
+		return "", "", "", "", fmt.Errorf("no replica %q of volume %q in app %q", replica, volName, appName)
+	case len(matches) > 1:
+		return "", "", "", "", fmt.Errorf("volume %q has %d claims in app %q (%s): name a replica, e.g. %s/%s/0",
+			volName, len(matches), appName, strings.Join(matches, ", "), appName, volName)
+	}
+	return appName, volName, matches[0], "", nil
+}
+
+// replicaRepoSuffix mirrors compile.RepoSuffixFor for an already-resolved
+// ordinal: "" when the volume has a single claim.
+func replicaRepoSuffix(replica string) string {
+	if replica == "" {
+		return ""
+	}
+	return "/r" + replica
 }
 
 // runBackupJob creates a one-off restic job, waits for it, and returns its
 // logs.
-func runBackupJob(ctx context.Context, cmd *cobra.Command, d *deploy.Deployer, appName, volName, claimName string, command []string, readWrite bool, timeout time.Duration) (string, error) {
+func runBackupJob(ctx context.Context, cmd *cobra.Command, d *deploy.Deployer, appName, volName, claimName, repoSuffix string, command []string, readWrite bool, timeout time.Duration) (string, error) {
 	ns := compile.NamespaceFor(appName)
 	if err := d.EnsureBackupSecret(ctx, appName); err != nil {
 		return "", err
 	}
-	spec := compile.BackupPodSpec(appName, volName, claimName, command, readWrite)
+	spec := compile.BackupPodSpec(appName, volName, claimName, repoSuffix, command, readWrite)
 	backoff := int32(0)
 	job := &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
@@ -226,7 +279,7 @@ func lastLines(s string, n int) string {
 
 func newBackupNowCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "now <app>/<volume>",
+		Use:   "now <app>/<volume>[/<replica>]",
 		Short: "Take a backup immediately",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -235,13 +288,13 @@ func newBackupNowCmd() *cobra.Command {
 				return err
 			}
 			ctx := cmd.Context()
-			appName, volName, claim, err := backupTarget(ctx, d, args[0])
+			appName, volName, claim, repoSuffix, err := backupTarget(ctx, d, args[0])
 			if err != nil {
 				return err
 			}
 			cmd.Printf("Backing up %s/%s (claim %s)...\n", appName, volName, claim)
 			script := "restic snapshots >/dev/null 2>&1 || restic init; restic backup /data --tag jekyo --tag manual"
-			logs, err := runBackupJob(ctx, cmd, d, appName, volName, claim, []string{"/bin/sh", "-c", script}, false, 15*time.Minute)
+			logs, err := runBackupJob(ctx, cmd, d, appName, volName, claim, repoSuffix, []string{"/bin/sh", "-c", script}, false, 15*time.Minute)
 			if err != nil {
 				return err
 			}
@@ -254,7 +307,7 @@ func newBackupNowCmd() *cobra.Command {
 
 func newBackupLsCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "ls <app>/<volume>",
+		Use:   "ls <app>/<volume>[/<replica>]",
 		Short: "List snapshots for a volume",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -263,11 +316,11 @@ func newBackupLsCmd() *cobra.Command {
 				return err
 			}
 			ctx := cmd.Context()
-			appName, volName, claim, err := backupTarget(ctx, d, args[0])
+			appName, volName, claim, repoSuffix, err := backupTarget(ctx, d, args[0])
 			if err != nil {
 				return err
 			}
-			logs, err := runBackupJob(ctx, cmd, d, appName, volName, claim, []string{"restic", "snapshots", "--json"}, false, 5*time.Minute)
+			logs, err := runBackupJob(ctx, cmd, d, appName, volName, claim, repoSuffix, []string{"restic", "snapshots", "--json"}, false, 5*time.Minute)
 			if err != nil {
 				return err
 			}
@@ -303,7 +356,7 @@ func newBackupLsCmd() *cobra.Command {
 
 func newBackupRestoreCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "restore <app>/<volume> [snapshot]",
+		Use:   "restore <app>/<volume>[/<replica>] [snapshot]",
 		Short: "Restore a volume from a snapshot (stops the app during restore)",
 		Args:  cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -316,7 +369,7 @@ func newBackupRestoreCmd() *cobra.Command {
 				return err
 			}
 			ctx := cmd.Context()
-			appName, volName, claim, err := backupTarget(ctx, d, args[0])
+			appName, volName, claim, repoSuffix, err := backupTarget(ctx, d, args[0])
 			if err != nil {
 				return err
 			}
@@ -342,7 +395,7 @@ func newBackupRestoreCmd() *cobra.Command {
 
 			cmd.Println("Restoring", snapshot, "...")
 			script := fmt.Sprintf("restic restore %s --target / --include /data --delete", snapshot)
-			logs, err := runBackupJob(ctx, cmd, d, appName, volName, claim, []string{"/bin/sh", "-c", script}, true, 30*time.Minute)
+			logs, err := runBackupJob(ctx, cmd, d, appName, volName, claim, repoSuffix, []string{"/bin/sh", "-c", script}, true, 30*time.Minute)
 			if err != nil {
 				return err
 			}

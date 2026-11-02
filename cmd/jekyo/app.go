@@ -132,6 +132,7 @@ func newUpCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			warnGPUUnschedulable(cmd, ctx, d, app)
 			rev, err := d.Apply(ctx, app.Name, objs)
 			if err != nil {
 				return err
@@ -324,4 +325,28 @@ func sortedVolumeNames(app *dsl.App) []string {
 	}
 	sort.Strings(names)
 	return names
+}
+
+// warnGPUUnschedulable says so when a service asks for GPUs the cluster
+// cannot schedule. `gpu: N` compiles to a nvidia.com/gpu request, which
+// needs the device plugin; without it the pod sits Pending with only the
+// scheduler's "Insufficient nvidia.com/gpu" to go on (issue #37).
+func warnGPUUnschedulable(cmd *cobra.Command, ctx context.Context, d *deploy.Deployer, app *dsl.App) {
+	var want []string
+	for _, name := range sortedServiceNames(app) {
+		svc := app.Services[name]
+		if svc.GPU.Enabled() && svc.GPU.Devices == "" {
+			want = append(want, name)
+		}
+	}
+	if len(want) == 0 {
+		return
+	}
+	total, err := d.GPUSchedulable(ctx)
+	if err != nil || total > 0 {
+		return
+	}
+	cmd.PrintErrf("warning: %s request nvidia.com/gpu but no node advertises it, so they will stay Pending.\n", strings.Join(want, ", "))
+	cmd.PrintErrln("  The NVIDIA device plugin is missing: re-run 'jekyo server install' with the same flags to install it,")
+	cmd.PrintErrln("  or pin cards explicitly with gpu: {devices: \"0\"} to bypass scheduling (nothing then accounts for them).")
 }

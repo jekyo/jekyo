@@ -183,6 +183,31 @@ func buildx(baseDir string, b *dsl.Build, platform, ref string, log io.Writer) (
 	for _, k := range sortedKeys(b.Args) {
 		args = append(args, "--build-arg", k+"="+b.Args[k])
 	}
+	// BuildKit credentials: forwarded agent and per-id secret files. A
+	// secret never becomes a build arg, because args are recorded in image
+	// history (issue #34).
+	if b.SSH {
+		args = append(args, "--ssh", "default")
+	}
+	for _, id := range sortedKeys(b.Secrets) {
+		f, err := os.CreateTemp("", "jekyo-build-secret-*")
+		if err != nil {
+			return "", err
+		}
+		defer os.Remove(f.Name())
+		if err := f.Chmod(0o600); err != nil {
+			f.Close()
+			return "", err
+		}
+		if _, err := f.WriteString(b.Secrets[id].Content); err != nil {
+			f.Close()
+			return "", err
+		}
+		if err := f.Close(); err != nil {
+			return "", err
+		}
+		args = append(args, "--secret", "id="+id+",src="+f.Name())
+	}
 	args = append(args, ctxDir)
 
 	cmd := exec.Command("docker", args...)
@@ -204,6 +229,16 @@ func contentHash(baseDir string, b *dsl.Build, platform string) (string, error) 
 	fmt.Fprintf(h, "platform=%s\n", platform)
 	for _, k := range sortedKeys(b.Args) {
 		fmt.Fprintf(h, "arg=%s=%s\n", k, b.Args[k])
+	}
+	// Build secrets contribute their ids, never their values: a Dockerfile
+	// that consumes a different set of secrets is a different build, but
+	// rotating a credential must not re-tag and redeploy an image whose
+	// contents are unchanged (issue #34).
+	for _, k := range sortedKeys(b.Secrets) {
+		fmt.Fprintf(h, "secret=%s\n", k)
+	}
+	if b.SSH {
+		fmt.Fprint(h, "ssh=agent\n")
 	}
 
 	ctxDir := b.Context

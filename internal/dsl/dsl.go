@@ -81,7 +81,10 @@ type Service struct {
 	Metrics *Metrics `yaml:"metrics"`
 	// Schedule turns the service into a CronJob (cron syntax, e.g.
 	// "0 3 * * *"): image/build + command run on that schedule. Mutually
-	// exclusive with http, replicas, and volumes.
+	// exclusive with http, replicas and expose, which all need a stable
+	// network identity. Volumes are allowed: the job mounts a standalone
+	// claim, and ConcurrencyPolicy Forbid keeps runs from overlapping on
+	// it (issue #35).
 	Schedule string  `yaml:"schedule"`
 	Replicas *int    `yaml:"replicas"`
 	Stateful *bool   `yaml:"stateful"`
@@ -120,6 +123,15 @@ type Build struct {
 	Dockerfile string            `yaml:"dockerfile"`
 	Inline     string            `yaml:"inline"`
 	Args       map[string]string `yaml:"args"`
+	// SSH forwards the local SSH agent into the build
+	// (BuildKit --mount=type=ssh), so a Dockerfile can fetch private
+	// dependencies over git+ssh (issue #34).
+	SSH bool `yaml:"ssh"`
+	// Secrets are build-time credentials delivered through BuildKit
+	// (--mount=type=secret,id=<key>), never through build args: args are
+	// recorded in image history. Values follow the files: shape — a local
+	// path, or {from: ${VAR}} for interpolated content (issue #34).
+	Secrets map[string]FileMount `yaml:"secrets"`
 }
 
 type HTTP struct {
@@ -290,6 +302,13 @@ type Security struct {
 	RunAs           *int64 `yaml:"run-as"`
 	ReadOnlyRoot    bool   `yaml:"read-only-root"`
 	NoNewPrivileges *bool  `yaml:"no-new-privileges"`
+	// AppArmor selects the container's AppArmor profile:
+	// "runtime-default" (the default when unset), "unconfined", or
+	// "localhost/<profile>" for one loaded on the node. It maps 1:1 onto
+	// securityContext.appArmorProfile. "unconfined" drops confinement for
+	// the container and exists as an escape hatch for a broken host
+	// profile, not as a routine setting (issue #33).
+	AppArmor string `yaml:"apparmor"`
 }
 
 // Network selects host networking and egress policy.
@@ -344,6 +363,15 @@ func (g *GPU) UnmarshalYAML(unmarshal func(any) error) error {
 
 func (g GPU) Enabled() bool { return g.Count > 0 || g.Devices != "" }
 
+// CountOrOne is how many GPUs to request. `gpu: {devices: "1"}` names a
+// card without a count, which means one.
+func (g GPU) CountOrOne() int {
+	if g.Count < 1 {
+		return 1
+	}
+	return g.Count
+}
+
 type Volume struct {
 	Size  string `yaml:"size"`
 	Class string `yaml:"class"`
@@ -352,6 +380,11 @@ type Volume struct {
 	// Backup schedules restic snapshots of this volume to the cluster's
 	// configured S3 target (jekyo backup config).
 	Backup *VolumeBackup `yaml:"backup"`
+	// PerReplica gives every replica of its service an independent claim
+	// (the StatefulSet's volumeClaimTemplate), which is what lets a
+	// service with local state run more than one replica. Required for
+	// replicas > 1; the default shares one claim (issue #36).
+	PerReplica bool `yaml:"per-replica"`
 }
 
 // VolumeBackup configures scheduled backups for one volume.

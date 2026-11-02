@@ -15,9 +15,12 @@ import (
 	"k8s.io/apimachinery/pkg/util/validation"
 )
 
-// Parse reads a jekyo.yaml. env provides values for ${VAR} interpolation
-// (interpolation applies to env: values only — not to commands or inline
-// Dockerfiles, which legitimately contain ${...} of their own).
+// Parse reads a jekyo.yaml. env provides values for ${VAR} interpolation.
+// Interpolation applies to env:, secrets:, files:, build.secrets: and the
+// http: hosts (domain/domains/redirect, issue #38) — not to commands or
+// inline Dockerfiles, which legitimately contain ${...} of their own.
+// Hosts are resolved before validation, so the DNS check sees the real
+// name rather than the literal ${VAR}.
 func Parse(data []byte, env map[string]string) (*App, error) {
 	var app App
 	if err := yaml.UnmarshalWithOptions(data, &app, yaml.Strict()); err != nil {
@@ -52,6 +55,42 @@ func Parse(data []byte, env map[string]string) (*App, error) {
 				}
 				f.Content = iv
 				svc.Files[path] = f
+			}
+		}
+		// http hosts are per-environment by nature; resolve them before
+		// validate() sees them (issue #38)
+		if h := svc.HTTP; h != nil {
+			iv, err := interpolate(h.Domain, env)
+			if err != nil {
+				return nil, fmt.Errorf("service %s: http.domain: %w", name, err)
+			}
+			h.Domain = iv
+			for i, d := range h.Domains {
+				iv, err := interpolate(d, env)
+				if err != nil {
+					return nil, fmt.Errorf("service %s: http.domains[%d]: %w", name, i, err)
+				}
+				h.Domains[i] = iv
+			}
+			iv, err = interpolate(h.Redirect, env)
+			if err != nil {
+				return nil, fmt.Errorf("service %s: http.redirect: %w", name, err)
+			}
+			h.Redirect = iv
+		}
+		// build secrets carry credentials, so they interpolate like
+		// secrets: rather than being read from the manifest (issue #34)
+		if svc.Build != nil {
+			for id, f := range svc.Build.Secrets {
+				if f.From == "" {
+					continue
+				}
+				iv, err := interpolate(f.From, env)
+				if err != nil {
+					return nil, fmt.Errorf("service %s: build.secrets %s: %w", name, id, err)
+				}
+				f.Content = iv
+				svc.Build.Secrets[id] = f
 			}
 		}
 		for iname, ic := range svc.Init {
@@ -114,6 +153,21 @@ func ParseFile(path string, extraEnv map[string]string) (*App, error) {
 				svc.Files[mount] = f
 			}
 		}
+		// build secrets given as a path are read here, like files: — a
+		// missing credential must fail at render, not at build (issue #34)
+		if svc.Build != nil {
+			for id, f := range svc.Build.Secrets {
+				if f.Path == "" {
+					continue
+				}
+				content, err := os.ReadFile(filepath.Join(base, f.Path))
+				if err != nil {
+					return nil, fmt.Errorf("service %s: build.secrets %s: %w", name, id, err)
+				}
+				f.Content = string(content)
+				svc.Build.Secrets[id] = f
+			}
+		}
 	}
 	return app, nil
 }
@@ -143,6 +197,23 @@ func interpolate(s string, env map[string]string) (string, error) {
 }
 
 var nameRe = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$`)
+
+// buildSecretIDRe matches what BuildKit accepts as a --mount=type=secret id.
+var buildSecretIDRe = regexp.MustCompile(`^[A-Za-z0-9._-]{1,64}$`)
+
+// apparmorLocalhostRe matches "localhost/<profile>", a profile loaded on
+// the node (issue #33).
+var apparmorLocalhostRe = regexp.MustCompile(`^localhost/[A-Za-z0-9._-]{1,200}$`)
+
+// validAppArmor reports whether a security.apparmor value is one of the
+// three profile types Kubernetes accepts.
+func validAppArmor(v string) bool {
+	switch v {
+	case "", "runtime-default", "unconfined":
+		return true
+	}
+	return apparmorLocalhostRe.MatchString(v)
+}
 
 func validate(app *App) error {
 	var errs []string
@@ -188,6 +259,18 @@ func validate(app *App) error {
 		if b := svc.Build; b != nil {
 			if b.Dockerfile != "" && b.Inline != "" {
 				bad("%s: build.dockerfile and build.inline are mutually exclusive", p)
+			}
+			for _, id := range sortedKeys(b.Secrets) {
+				f := b.Secrets[id]
+				if !buildSecretIDRe.MatchString(id) {
+					bad("%s: build.secrets %q must be a BuildKit secret id (letters, digits, dash, underscore, dot)", p, id)
+				}
+				switch {
+				case f.Path == "" && f.From == "":
+					bad("%s: build.secrets %s needs a local path or from:", p, id)
+				case f.Path != "" && f.From != "":
+					bad("%s: build.secrets %s: path and from: are mutually exclusive", p, id)
+				}
 			}
 		}
 		if svc.HTTP != nil {
@@ -258,7 +341,20 @@ func validate(app *App) error {
 			}
 		}
 		if svc.Replicas != nil && *svc.Replicas > 1 && svc.IsStateful() {
-			bad("%s: replicas > 1 with volumes needs per-replica volumes (not yet supported)", p)
+			// Per-replica volumes are what make this safe: each replica
+			// claims its own PVC instead of racing for one (issue #36).
+			for _, vol := range sortedKeys(svc.Volumes) {
+				v, ok := app.Volumes[vol]
+				if !ok {
+					continue // reported below as undeclared
+				}
+				if !v.PerReplica {
+					bad("%s: replicas > 1 needs volume %q to set per-replica: true (one claim cannot be shared by several replicas)", p, vol)
+				}
+			}
+			if len(svc.Volumes) == 0 {
+				bad("%s: replicas > 1 with stateful: true is not supported", p)
+			}
 		}
 		for vol := range svc.Volumes {
 			if _, ok := app.Volumes[vol]; !ok {
@@ -340,9 +436,24 @@ func validate(app *App) error {
 				}
 			}
 		}
+		if svc.Security != nil && !validAppArmor(svc.Security.AppArmor) {
+			bad("%s: security.apparmor must be runtime-default, unconfined or localhost/<profile>", p)
+		}
+		for _, iname := range sortedKeys(svc.Init) {
+			if ic := svc.Init[iname]; ic.Security != nil && !validAppArmor(ic.Security.AppArmor) {
+				bad("%s: init %s security.apparmor must be runtime-default, unconfined or localhost/<profile>", p, iname)
+			}
+		}
+		for _, scName := range sortedKeys(svc.Sidecars) {
+			if sc := svc.Sidecars[scName]; sc.Security != nil && !validAppArmor(sc.Security.AppArmor) {
+				bad("%s: sidecar %s security.apparmor must be runtime-default, unconfined or localhost/<profile>", p, scName)
+			}
+		}
+		// schedule: volumes are fine (a Job's pod mounts a PVC like any
+		// other); http/replicas/expose need a stable identity (issue #35)
 		if svc.Schedule != "" {
-			if svc.HTTP != nil || svc.Replicas != nil || len(svc.Volumes) > 0 || len(svc.Expose) > 0 {
-				bad("%s: schedule is mutually exclusive with http, replicas, volumes, and expose", p)
+			if svc.HTTP != nil || svc.Replicas != nil || len(svc.Expose) > 0 {
+				bad("%s: schedule is mutually exclusive with http, replicas, and expose", p)
 			}
 			if len(strings.Fields(svc.Schedule)) != 5 {
 				bad("%s: schedule %q is not a 5-field cron expression", p, svc.Schedule)

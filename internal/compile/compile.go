@@ -82,17 +82,23 @@ func Compile(app *dsl.App, opts Options) ([]runtime.Object, error) {
 		objs = append(objs, sec)
 	}
 
-	// Volumes mounted by several services become standalone PVCs shared
-	// between their pods (single-node RWO); single-service volumes stay
-	// volumeClaimTemplates on their StatefulSet.
-	shared := sharedVolumes(app)
+	// Volumes mounted by several services, or by a scheduled one, become
+	// standalone PVCs shared between their pods (single-node RWO);
+	// single-service volumes stay volumeClaimTemplates on their
+	// StatefulSet.
+	shared := standaloneVolumes(app)
 	for _, volName := range sortedKeys(shared) {
 		objs = append(objs, standalonePVC(app, volName))
 	}
 
 	for _, volName := range sortedKeys(app.Volumes) {
 		if app.Volumes[volName].Backup != nil {
-			objs = append(objs, backupCronJob(app, volName, shared[volName], opts.NoBackupTarget))
+			// A per-replica volume has one claim per replica, so it needs
+			// one CronJob per claim: a single job would back up replica 0
+			// and silently leave the rest unprotected (issue #36).
+			for _, cj := range backupCronJobs(app, volName, shared[volName], opts.NoBackupTarget) {
+				objs = append(objs, cj)
+			}
 		}
 	}
 
@@ -266,17 +272,24 @@ func namespace(app *dsl.App) *corev1.Namespace {
 	}
 }
 
-// sharedVolumes returns volumes mounted by more than one service.
-func sharedVolumes(app *dsl.App) map[string]bool {
+// standaloneVolumes returns volumes that live in a PVC of their own rather
+// than in a StatefulSet's claim template: those mounted by more than one
+// service, and those mounted by a scheduled service, since a CronJob has no
+// claim template to put them in (issue #35).
+func standaloneVolumes(app *dsl.App) map[string]bool {
 	count := map[string]int{}
+	cron := map[string]bool{}
 	for _, svc := range app.Services {
 		for vol := range svc.Volumes {
 			count[vol]++
+			if svc.Schedule != "" {
+				cron[vol] = true
+			}
 		}
 	}
 	out := map[string]bool{}
 	for vol, n := range count {
-		if n > 1 {
+		if n > 1 || cron[vol] {
 			out[vol] = true
 		}
 	}
@@ -301,38 +314,90 @@ func standalonePVC(app *dsl.App, volName string) *corev1.PersistentVolumeClaim {
 	return pvc
 }
 
-// ClaimNameFor resolves the PVC name a volume is stored under: shared
-// volumes use a standalone claim named after the volume; single-service
-// volumes live in the StatefulSet's claim template (<vol>-<service>-0).
-func ClaimNameFor(app *dsl.App, volName string, isShared bool) string {
-	if isShared {
-		return volName
+// ClaimNamesFor resolves every PVC a volume is stored under, in ordinal
+// order. A standalone volume is one claim named after the volume. A
+// single-service volume lives in its StatefulSet's claim template, as
+// <vol>-<service>-<ordinal> — one claim per replica, so a per-replica
+// volume on a 3-replica service returns three names (issue #36).
+func ClaimNamesFor(app *dsl.App, volName string, isStandalone bool) []string {
+	if isStandalone {
+		return []string{volName}
 	}
 	for _, svcName := range sortedKeys(app.Services) {
-		if _, ok := app.Services[svcName].Volumes[volName]; ok {
-			return volName + "-" + svcName + "-0"
+		svc := app.Services[svcName]
+		if _, ok := svc.Volumes[volName]; !ok {
+			continue
 		}
+		n := 1
+		if app.Volumes[volName].PerReplica {
+			n = svc.ReplicaCount()
+		}
+		var out []string
+		for i := 0; i < n; i++ {
+			out = append(out, fmt.Sprintf("%s-%s-%d", volName, svcName, i))
+		}
+		return out
 	}
-	return volName
+	return []string{volName}
 }
 
-// backupCronJob renders the scheduled restic backup for one volume. The
-// jekyo-backup secret provides the S3 target and restic password; the
-// repository path is namespaced per app/volume.
-func backupCronJob(app *dsl.App, volName string, isShared, noTarget bool) *batchv1.CronJob {
+// ClaimNameFor is ClaimNamesFor's first claim: the only one for every
+// volume that is not per-replica.
+func ClaimNameFor(app *dsl.App, volName string, isStandalone bool) string {
+	return ClaimNamesFor(app, volName, isStandalone)[0]
+}
+
+// BackupJobName is the CronJob that backs up one claim of a volume. A
+// volume with a single claim keeps the historical "backup-<volume>" name;
+// a per-replica volume gets one job per ordinal (issue #36).
+func BackupJobName(volName string, replica, replicas int) string {
+	if replicas <= 1 {
+		return "backup-" + volName
+	}
+	return fmt.Sprintf("backup-%s-%d", volName, replica)
+}
+
+// RepoSuffixFor is appended to a volume's restic repository path so each
+// replica of a per-replica volume keeps its own repository: snapshots from
+// different replicas must never share one, or a restore cannot tell them
+// apart (issue #36).
+func RepoSuffixFor(replica, replicas int) string {
+	if replicas <= 1 {
+		return ""
+	}
+	return fmt.Sprintf("/r%d", replica)
+}
+
+// backupCronJobs renders the scheduled restic backups for one volume: one
+// per claim. The jekyo-backup secret provides the S3 target and restic
+// password; the repository path is namespaced per app/volume (and per
+// replica when the volume is per-replica).
+func backupCronJobs(app *dsl.App, volName string, isStandalone, noTarget bool) []*batchv1.CronJob {
+	claims := ClaimNamesFor(app, volName, isStandalone)
+	var out []*batchv1.CronJob
+	for i, claim := range claims {
+		out = append(out, backupCronJob(app, volName, claim, i, len(claims), noTarget))
+	}
+	return out
+}
+
+func backupCronJob(app *dsl.App, volName, claimName string, replica, replicas int, noTarget bool) *batchv1.CronJob {
 	b := app.Volumes[volName].Backup
 	script := fmt.Sprintf(
 		"restic snapshots >/dev/null 2>&1 || restic init; "+
 			"restic backup /data --tag jekyo && "+
 			"restic forget --keep-last %d --prune",
 		b.KeepCount())
-	podSpec := BackupPodSpec(app.Name, volName, ClaimNameFor(app, volName, isShared), []string{"/bin/sh", "-c", script}, false)
+	podSpec := BackupPodSpec(app.Name, volName, claimName, RepoSuffixFor(replica, replicas), []string{"/bin/sh", "-c", script}, false)
 	l := labels(app, "")
 	l["jekyo.io/volume"] = volName
 	l["jekyo.io/backup"] = "true"
+	if replicas > 1 {
+		l["jekyo.io/replica"] = strconv.Itoa(replica)
+	}
 	cj := &batchv1.CronJob{
 		TypeMeta:   metav1.TypeMeta{APIVersion: "batch/v1", Kind: "CronJob"},
-		ObjectMeta: metav1.ObjectMeta{Name: "backup-" + volName, Namespace: NamespaceFor(app.Name), Labels: l},
+		ObjectMeta: metav1.ObjectMeta{Name: BackupJobName(volName, replica, replicas), Namespace: NamespaceFor(app.Name), Labels: l},
 		Spec: batchv1.CronJobSpec{
 			Schedule:                   b.Schedule,
 			ConcurrencyPolicy:          batchv1.ForbidConcurrent,
@@ -357,6 +422,11 @@ func backupCronJob(app *dsl.App, volName string, isShared, noTarget bool) *batch
 	return cj
 }
 
+// GPUResourceName is the extended resource the NVIDIA device plugin
+// advertises. Requesting it is what makes the scheduler account for GPUs
+// instead of letting every pod see every card (issue #37).
+const GPUResourceName = corev1.ResourceName("nvidia.com/gpu")
+
 // LocalBackupHostPath is where local backup repositories live on the
 // node; mount a dedicated disk there for real durability.
 const LocalBackupHostPath = "/var/lib/jekyo/backups"
@@ -364,7 +434,7 @@ const LocalBackupHostPath = "/var/lib/jekyo/backups"
 // BackupPodSpec is the shared pod shape for scheduled backups and the
 // on-demand backup/ls/restore jobs the CLI creates. The local backup
 // directory is always mounted; S3 targets simply never touch it.
-func BackupPodSpec(appName, volName, claimName string, command []string, readWrite bool) corev1.PodSpec {
+func BackupPodSpec(appName, volName, claimName, repoSuffix string, command []string, readWrite bool) corev1.PodSpec {
 	env := []corev1.EnvVar{
 		{Name: "JEKYO_BACKUP_REPO_BASE", ValueFrom: &corev1.EnvVarSource{SecretKeyRef: &corev1.SecretKeySelector{
 			LocalObjectReference: corev1.LocalObjectReference{Name: BackupSecretName}, Key: "repo-base"}}},
@@ -374,7 +444,7 @@ func BackupPodSpec(appName, volName, claimName string, command []string, readWri
 			LocalObjectReference: corev1.LocalObjectReference{Name: BackupSecretName}, Key: "secret-key"}}},
 		{Name: "RESTIC_PASSWORD", ValueFrom: &corev1.EnvVarSource{SecretKeyRef: &corev1.SecretKeySelector{
 			LocalObjectReference: corev1.LocalObjectReference{Name: BackupSecretName}, Key: "restic-password"}}},
-		{Name: "RESTIC_REPOSITORY", Value: fmt.Sprintf("$(JEKYO_BACKUP_REPO_BASE)/%s/%s", appName, volName)},
+		{Name: "RESTIC_REPOSITORY", Value: fmt.Sprintf("$(JEKYO_BACKUP_REPO_BASE)/%s/%s%s", appName, volName, repoSuffix)},
 	}
 	return corev1.PodSpec{
 		RestartPolicy: corev1.RestartPolicyOnFailure,
@@ -523,6 +593,23 @@ func workload(app *dsl.App, name string, svc dsl.Service, withPullSecret bool, s
 
 	if svc.Schedule != "" {
 		podSpec.RestartPolicy = corev1.RestartPolicyOnFailure
+		// A CronJob has no claim template, so its volumes are standalone
+		// PVCs mounted by name. ConcurrencyPolicy Forbid below is what
+		// keeps two runs off one RWO claim (issue #35).
+		for _, volName := range sortedKeys(svc.Volumes) {
+			vm := svc.Volumes[volName]
+			mount := corev1.VolumeMount{Name: volName, MountPath: vm.Path, SubPath: vm.Subpath}
+			podSpec.Containers[0].VolumeMounts = append(podSpec.Containers[0].VolumeMounts, mount)
+			for i := range podSpec.InitContainers {
+				podSpec.InitContainers[i].VolumeMounts = append(podSpec.InitContainers[i].VolumeMounts, mount)
+			}
+			podSpec.Volumes = append(podSpec.Volumes, corev1.Volume{
+				Name: volName,
+				VolumeSource: corev1.VolumeSource{
+					PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: volName},
+				},
+			})
+		}
 		return &batchv1.CronJob{
 			TypeMeta:   metav1.TypeMeta{APIVersion: "batch/v1", Kind: "CronJob"},
 			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: NamespaceFor(app.Name), Labels: labels(app, name)},
@@ -663,14 +750,14 @@ func container(name string, svc dsl.Service) (*corev1.Container, error) {
 	c.SecurityContext = securityContext(svc.Caps, svc.Security)
 
 	if svc.GPU.Enabled() {
-		devices := svc.GPU.Devices
-		if devices == "" {
-			devices = "all"
+		c.Env = append(c.Env, corev1.EnvVar{Name: "NVIDIA_DRIVER_CAPABILITIES", Value: "compute,utility"})
+		if svc.GPU.Devices != "" {
+			// Explicit pinning bypasses the scheduler on purpose: the
+			// operator named the cards, so the device plugin must not
+			// also hand some out. Nothing accounts for these, so two
+			// services pinned to one card still share it (issue #37).
+			c.Env = append(c.Env, corev1.EnvVar{Name: "NVIDIA_VISIBLE_DEVICES", Value: svc.GPU.Devices})
 		}
-		c.Env = append(c.Env,
-			corev1.EnvVar{Name: "NVIDIA_DRIVER_CAPABILITIES", Value: "compute,utility"},
-			corev1.EnvVar{Name: "NVIDIA_VISIBLE_DEVICES", Value: devices},
-		)
 	}
 
 	res, err := resources(svc.Resources)
@@ -678,6 +765,16 @@ func container(name string, svc dsl.Service) (*corev1.Container, error) {
 		return nil, fmt.Errorf("service %s: %w", name, err)
 	}
 	c.Resources = res
+	if svc.GPU.Enabled() && svc.GPU.Devices == "" {
+		// Request the count as a real resource so the scheduler accounts
+		// for it: without this every service saw every card and two of
+		// them silently landed on card 0 (issue #37). The device plugin
+		// sets NVIDIA_VISIBLE_DEVICES itself for what it allocates.
+		if c.Resources.Limits == nil {
+			c.Resources.Limits = corev1.ResourceList{}
+		}
+		c.Resources.Limits[GPUResourceName] = *resource.NewQuantity(int64(svc.GPU.CountOrOne()), resource.DecimalSI)
+	}
 
 	if h := svc.Health; h != nil {
 		handler := corev1.ProbeHandler{}
@@ -717,6 +814,22 @@ func securityContext(caps []string, sec *dsl.Security) *corev1.SecurityContext {
 	}
 	if sec != nil {
 		sc.RunAsUser = sec.RunAs
+		// AppArmor maps 1:1 onto the Kubernetes field; unset leaves the
+		// runtime's own default in place rather than naming it, so a node
+		// with a custom default keeps it (issue #33).
+		switch {
+		case sec.AppArmor == "":
+		case sec.AppArmor == "runtime-default":
+			sc.AppArmorProfile = &corev1.AppArmorProfile{Type: corev1.AppArmorProfileTypeRuntimeDefault}
+		case sec.AppArmor == "unconfined":
+			sc.AppArmorProfile = &corev1.AppArmorProfile{Type: corev1.AppArmorProfileTypeUnconfined}
+		default:
+			profile := strings.TrimPrefix(sec.AppArmor, "localhost/")
+			sc.AppArmorProfile = &corev1.AppArmorProfile{
+				Type:             corev1.AppArmorProfileTypeLocalhost,
+				LocalhostProfile: &profile,
+			}
+		}
 		if sec.ReadOnlyRoot {
 			t := true
 			sc.ReadOnlyRootFilesystem = &t

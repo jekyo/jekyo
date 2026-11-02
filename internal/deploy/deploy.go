@@ -360,3 +360,22 @@ func RenderYAML(objs []runtime.Object) (string, error) {
 	}
 	return strings.Join(docs, "---\n"), nil
 }
+
+// GPUSchedulable reports the total nvidia.com/gpu the cluster advertises.
+// Zero means the NVIDIA device plugin is not running, so a pod requesting
+// the resource stays Pending; jekyo installs the plugin when it detects a
+// GPU, but a cluster installed before that, or with --no-gpu, has none
+// (issue #37).
+func (d *Deployer) GPUSchedulable(ctx context.Context) (int64, error) {
+	nodes, err := d.Client.Typed.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return 0, err
+	}
+	var total int64
+	for _, n := range nodes.Items {
+		if q, ok := n.Status.Allocatable[compile.GPUResourceName]; ok {
+			total += q.Value()
+		}
+	}
+	return total, nil
+}
